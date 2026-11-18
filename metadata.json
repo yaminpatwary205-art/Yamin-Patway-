@@ -1,0 +1,6 @@
+{
+  "name": "Revision Alarm",
+  "description": "An alarm-driven study revision app with Bengali UI, 11 school subjects, English paragraph & vocabulary practice, Gemini lazy translation, and Google cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
