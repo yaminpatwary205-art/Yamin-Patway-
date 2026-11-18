@@ -187,6 +187,31 @@ class RevisionRepository(
         rescheduleAlarms()
     }
 
+    suspend fun addMultipleNotes(bookId: String, chapterId: String, rawMultiline: String, starred: Boolean = false) {
+        val lines = rawMultiline
+            .replace("\r\n", "\n")
+            .split("\n")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        if (lines.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val entities = lines.mapIndexed { idx, line ->
+            NoteEntity(
+                id = newId("nt"),
+                bookId = bookId,
+                chapterId = chapterId,
+                content = line.take(5000),
+                starred = starred,
+                updatedAtEpochMs = now + idx
+            )
+        }
+        dao.upsertNotes(entities)
+        if (currentUserId != null && isOnline()) {
+            entities.forEach { firestoreSync.pushDoc("notes", it.id, it.toFsMap()) }
+        }
+        rescheduleAlarms()
+    }
+
     suspend fun updateNote(note: NoteEntity) {
         val updated = note.copy(
             content = note.content.trim().ifBlank { "-" }.take(5000),

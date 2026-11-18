@@ -32,6 +32,7 @@ fun VocabListDetailScreen(
 ) {
     val scope = rememberCoroutineScope()
     var showBulkAdd by remember { mutableStateOf(false) }
+    var showEditList by remember { mutableStateOf(false) }
     var editingWord by remember { mutableStateOf<VocabWordEntity?>(null) }
     var bulkMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -42,9 +43,15 @@ fun VocabListDetailScreen(
     AnimatedMeshBackground {
         Scaffold(
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
             topBar = {
                 TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                        actionIconContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান")
@@ -55,6 +62,9 @@ fun VocabListDetailScreen(
                         IconButton(onClick = onPracticeNow, enabled = words.any { it.enabled }) {
                             Icon(Icons.Rounded.PlayArrow, contentDescription = "অনুশীলন শুরু")
                         }
+                        IconButton(onClick = { showEditList = true }) {
+                            Icon(Icons.Rounded.Edit, contentDescription = "তালিকা সম্পাদনা")
+                        }
                         IconButton(onClick = { bulkMode = !bulkMode; selectedIds = emptySet() }) {
                             Icon(if (bulkMode) Icons.Rounded.Close else Icons.Rounded.Checklist, contentDescription = "একাধিক বাছাই")
                         }
@@ -63,7 +73,12 @@ fun VocabListDetailScreen(
             },
             bottomBar = {
                 if (bulkMode && selectedIds.isNotEmpty()) {
-                    Surface(tonalElevation = 6.dp, modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        tonalElevation = 6.dp,
+                        modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                    ) {
                         Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("${selectedIds.size}টি শব্দ নির্বাচিত", fontWeight = FontWeight.Bold)
                             Button(
@@ -122,9 +137,11 @@ fun VocabListDetailScreen(
                                     onClick = {
                                         scope.launch { repository.updateVocabList(vocabList.copy(reverseMode = !vocabList.reverseMode)) }
                                     },
-                                    label = { Text("রিভার্স মোড (বাংলা দেখে ইংরেজি)") }
+                                    label = { Text("শব্দ লুকান (শুধু অর্থ দেখে টাইপ)") }
                                 )
-                                Text("প্রতি ${vocabList.intervalMinutes} মি.", style = MaterialTheme.typography.labelMedium)
+                                TextButton(onClick = { showEditList = true }) {
+                                    Text("প্রতি ${vocabList.intervalMinutes} মি.")
+                                }
                             }
                         }
                     }
@@ -241,6 +258,53 @@ fun VocabListDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { editingWord = null }) { Text("বাতিল") }
+            }
+        )
+    }
+
+    if (showEditList) {
+        var titleText by remember(vocabList.id) { mutableStateOf(vocabList.title) }
+        var intervalText by remember(vocabList.id) { mutableStateOf(vocabList.intervalMinutes.toString()) }
+        AlertDialog(
+            onDismissRequest = { showEditList = false },
+            title = { Text("ভোকাবুলারি তালিকা সম্পাদনা") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = titleText,
+                        onValueChange = { titleText = it },
+                        label = { Text("তালিকার নাম") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = intervalText,
+                        onValueChange = { intervalText = it.filter { c -> c.isDigit() } },
+                        label = { Text("ইন্টারভ্যাল (মিনিট)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val mins = (intervalText.toIntOrNull() ?: vocabList.intervalMinutes).coerceIn(1, 1440)
+                        scope.launch {
+                            repository.updateVocabList(
+                                vocabList.copy(
+                                    title = titleText.trim().ifBlank { vocabList.title },
+                                    intervalMinutes = mins
+                                )
+                            )
+                        }
+                        showEditList = false
+                    },
+                    enabled = titleText.isNotBlank()
+                ) { Text("সংরক্ষণ") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditList = false }) { Text("বাতিল") }
             }
         )
     }

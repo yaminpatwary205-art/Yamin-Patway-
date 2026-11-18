@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -13,6 +14,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Article
+import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -59,9 +62,14 @@ fun HomeScreen(
     AnimatedMeshBackground {
         Scaffold(
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
             topBar = {
                 TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                        actionIconContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("রিভিশন অ্যালার্ম", fontWeight = FontWeight.Bold)
@@ -119,6 +127,7 @@ fun HomeScreen(
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                     ) {
                         Row(
@@ -284,7 +293,7 @@ fun HomeScreen(
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = reverseMode, onCheckedChange = { reverseMode = it })
-                        Text("রিভার্স মোড (বাংলা দেখে ইংরেজি লিখুন)")
+                        Text("ইংরেজি শব্দ লুকান (ডিফল্টে শব্দ ও অর্থ দুটোই সামনে দেখাবে)", style = MaterialTheme.typography.bodySmall)
                     }
                     OutlinedTextField(
                         value = bulkWords,
@@ -317,23 +326,26 @@ fun HomeScreen(
 @Composable
 private fun SyncBadge(status: SyncStatus) {
     val (label, color) = when (status) {
-        SyncStatus.SYNCED -> "সিঙ্কড" to Color(0xFF10B981)
-        SyncStatus.SYNCING -> "সিঙ্ক হচ্ছে" to Color(0xFFF59E0B)
-        SyncStatus.OFFLINE -> "অফলাইন" to Color(0xFF6B7280)
-        SyncStatus.ERROR -> "সিঙ্ক ত্রুটি" to Color(0xFFEF4444)
-        SyncStatus.LOCAL_ONLY -> "লোকাল" to Color(0xFF6366F1)
+        SyncStatus.SYNCED -> "সিঙ্কড" to Color(0xFF059669)
+        SyncStatus.SYNCING -> "সিঙ্ক হচ্ছে" to Color(0xFFD97706)
+        SyncStatus.OFFLINE -> "অফলাইন" to Color(0xFF64748B)
+        SyncStatus.ERROR -> "সিঙ্ক ত্রুটি" to Color(0xFFDC2626)
+        SyncStatus.LOCAL_ONLY -> "লোকাল" to Color(0xFF4F46E5)
     }
+    val displayColor = adaptiveAccent(color)
     Surface(
         shape = RoundedCornerShape(50),
-        color = color.copy(alpha = 0.16f)
+        color = displayColor.copy(alpha = 0.16f),
+        contentColor = displayColor,
+        border = BorderStroke(1.dp, displayColor.copy(alpha = 0.32f))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(color))
-            Text(label, style = MaterialTheme.typography.labelSmall, color = color)
+            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(displayColor))
+            Text(label, style = MaterialTheme.typography.labelSmall, color = displayColor, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -358,12 +370,24 @@ private fun DashboardCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = state.nextTrigger?.labelBn ?: "যেকোনো বই বা প্যারাগ্রাফে নোট যোগ করুন",
+                        text = state.nextTrigger?.labelBn ?: "যেকোনো বই, প্যারাগ্রাফ বা ভোকাবুলারি যোগ করুন",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val activeNotes = state.notes.count { it.overrideEnabled != 0 }
+                    val activeParas = state.paragraphs.count { it.enabled && it.lines.isNotEmpty() }
+                    val activeVocabs = state.vocabLists.count { l -> l.enabled && state.vocabWords.any { it.listId == l.id && it.enabled } }
+                    if (activeNotes + activeParas + activeVocabs > 0) {
+                        Text(
+                            text = "একসাথে চালু: নোট ${activeNotes}টি • প্যারাগ্রাফ ${activeParas}টি • ভোকাবুলারি ${activeVocabs}টি",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 FilledTonalButton(
@@ -411,7 +435,8 @@ private fun DashboardCard(
             AnimatedVisibility(visible = state.stats.alarmModeActive) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.tertiaryContainer
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                 ) {
                     Text(
                         text = "অ্যালার্ম মোড চালু: স্ক্রিন জাগ্রত থাকবে এবং নির্ধারিত সময় হলেই সরাসরি ফুল-স্ক্রিন রিভিশন চালু হবে।",
@@ -432,18 +457,27 @@ private fun StatChip(
     color: Color,
     modifier: Modifier = Modifier
 ) {
+    val displayColor = adaptiveAccent(color)
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
-        color = color.copy(alpha = 0.14f)
+        color = displayColor.copy(alpha = 0.14f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, displayColor.copy(alpha = 0.25f))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
-            Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Icon(icon, contentDescription = null, tint = displayColor, modifier = Modifier.size(16.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
+            )
         }
     }
 }
@@ -526,6 +560,7 @@ private fun BooksAndNotesSection(
                     items(filteredNotes, key = { it.id }) { note ->
                         val book = bookMap[note.bookId]
                         val chap = chapterMap[note.chapterId]
+                        val bookAccent = adaptiveAccent(parseColorHex(book?.colorHex ?: "#4F46E5"))
                         GlassCard(
                             accentColor = parseColorHex(book?.colorHex ?: "#4F46E5"),
                             onClick = { onOpenChapter(note.bookId, note.chapterId) },
@@ -535,7 +570,8 @@ private fun BooksAndNotesSection(
                                 Text(
                                     "${book?.title.orEmpty()} • ${chap?.title.orEmpty()}",
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = parseColorHex(book?.colorHex ?: "#4F46E5")
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = bookAccent
                                 )
                                 Text(note.content, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
                             }
@@ -553,6 +589,7 @@ private fun BooksAndNotesSection(
             ) {
                 items(state.books, key = { it.id }) { book ->
                     val accent = parseColorHex(book.colorHex)
+                    val displayAccent = adaptiveAccent(accent)
                     val bookNotes = state.notes.filter { it.bookId == book.id }
                     val revisedToday = bookNotes.count { it.lastRevisedDay == today }
                     val progress = if (bookNotes.isEmpty()) 0f else revisedToday.toFloat() / bookNotes.size
@@ -571,7 +608,7 @@ private fun BooksAndNotesSection(
                                 .fillMaxWidth()
                                 .background(
                                     Brush.verticalGradient(
-                                        listOf(accent.copy(alpha = 0.14f), Color.Transparent)
+                                        listOf(displayAccent.copy(alpha = 0.12f), Color.Transparent)
                                     )
                                 )
                                 .padding(14.dp),
@@ -584,14 +621,15 @@ private fun BooksAndNotesSection(
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
-                                    color = accent.copy(alpha = 0.18f),
+                                    color = displayAccent.copy(alpha = 0.16f),
+                                    contentColor = displayAccent,
                                     modifier = Modifier.size(38.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             bookIconForKey(book.iconKey),
                                             contentDescription = book.title,
-                                            tint = accent,
+                                            tint = displayAccent,
                                             modifier = Modifier.size(22.dp)
                                         )
                                     }
@@ -609,6 +647,7 @@ private fun BooksAndNotesSection(
                                 text = book.title,
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 minLines = 2
@@ -622,15 +661,21 @@ private fun BooksAndNotesSection(
                                 Text(
                                     text = if (book.enabled) "সক্রিয়: ${activeCount}টি" else "বিরতিতে",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (book.enabled) accent else MaterialTheme.colorScheme.onSurfaceVariant
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (book.enabled) displayAccent else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 if (book.examDateEpochMs > 0L) {
                                     val days = ((book.examDateEpochMs - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0)
-                                    Surface(shape = RoundedCornerShape(6.dp), color = accent.copy(alpha = 0.16f)) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = displayAccent.copy(alpha = 0.16f),
+                                        contentColor = displayAccent
+                                    ) {
                                         Text(
                                             "${days}দি",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = accent,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = displayAccent,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
@@ -659,7 +704,7 @@ private fun ParagraphPracticeSection(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Rounded.Article, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
                 Text("ইংরেজি প্যারাগ্রাফ বা কম্পোজিশন যোগ করুন", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
                     "বড় প্যারাগ্রাফ পেস্ট করলে অ্যাপ লাইনে লাইনে ভাগ করবে এবং প্রতিবার অ্যালার্মে মাত্র ১টি লাইন দেখাবে ও অনুবাদ করবে।",
@@ -742,7 +787,7 @@ private fun VocabularySection(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Rounded.Translate, contentDescription = null, modifier = Modifier.size(44.dp), tint = Color(0xFF7C3AED))
+                Icon(Icons.Rounded.Translate, contentDescription = null, modifier = Modifier.size(44.dp), tint = adaptiveAccent(Color(0xFF7C3AED)))
                 Text("ইংরেজি ভোকাবুলারি তালিকা তৈরি করুন", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
                     "একসাথে অনেক ইংরেজি শব্দ যোগ করুন। অ্যালার্মে একবারে মাত্র ১টি শব্দ আসবে ও তাৎক্ষণিক বাংলা অর্থ দেখাবে।",
@@ -799,7 +844,7 @@ private fun VocabularySection(
                             }
                             Row {
                                 IconButton(onClick = { onOpenList(list.id) }) {
-                                    Icon(Icons.Rounded.ListAlt, contentDescription = "শব্দ তালিকা দেখুন")
+                                    Icon(Icons.AutoMirrored.Rounded.ListAlt, contentDescription = "শব্দ তালিকা দেখুন")
                                 }
                                 IconButton(onClick = { scope.launch { repository.deleteVocabList(list.id) } }) {
                                     Icon(Icons.Rounded.DeleteOutline, contentDescription = "মুছুন", tint = MaterialTheme.colorScheme.error)

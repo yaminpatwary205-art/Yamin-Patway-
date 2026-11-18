@@ -63,7 +63,20 @@ fun AuthScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Spacer(Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(
+                    onClick = onContinueWithoutLogin,
+                    enabled = !isLoading,
+                    modifier = Modifier.testTag("skip_login_top_button")
+                ) {
+                    Text("Skip • স্কিপ", fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
 
             Image(
                 painter = painterResource(id = R.drawable.ic_revision_alarm_1795004301502),
@@ -81,6 +94,7 @@ fun AuthScreen(
                 text = "রিভিশন অ্যালার্ম",
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
                 textAlign = TextAlign.Center
             )
 
@@ -189,12 +203,21 @@ fun AuthScreen(
                 modifier = Modifier
                     .widthIn(max = 460.dp)
                     .fillMaxWidth()
-                    .height(50.dp)
+                    .height(52.dp)
                     .testTag("continue_local_button"),
                 shape = RoundedCornerShape(16.dp)
             ) {
-                Text("লগইন ছাড়াই চালিয়ে যান (লোকাল মোড)")
+                Text("Skip — অ্যাকাউন্ট ছাড়াই চালিয়ে যান", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             }
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = "Google অ্যাকাউন্ট না থাকলেও Skip করে সব ফিচার ব্যবহার করতে পারবেন।",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
 
             Spacer(Modifier.height(24.dp))
         }
@@ -211,14 +234,15 @@ private fun FeatureRow(
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             modifier = Modifier.size(40.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(22.dp))
             }
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

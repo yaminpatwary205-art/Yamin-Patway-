@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.LibraryBooks
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,6 +29,7 @@ import com.example.data.local.ChapterEntity
 import com.example.data.local.NoteEntity
 import com.example.ui.components.AnimatedMeshBackground
 import com.example.ui.components.GlassCard
+import com.example.ui.components.adaptiveAccent
 import com.example.ui.components.bookIconForKey
 import com.example.ui.components.parseColorHex
 import com.example.ui.theme.SubjectColors
@@ -48,6 +50,7 @@ fun BookDetailScreen(
 ) {
     val scope = rememberCoroutineScope()
     val accent = parseColorHex(book.colorHex)
+    val displayAccent = adaptiveAccent(accent)
     val today = remember { RevisionRepository.todayDayString() }
 
     var showAddChapter by remember { mutableStateOf(false) }
@@ -59,9 +62,15 @@ fun BookDetailScreen(
     AnimatedMeshBackground {
         Scaffold(
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
             topBar = {
                 TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                        actionIconContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
                     navigationIcon = {
                         IconButton(onClick = onBack, modifier = Modifier.testTag("back_from_book")) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান")
@@ -69,7 +78,7 @@ fun BookDetailScreen(
                     },
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(bookIconForKey(book.iconKey), contentDescription = null, tint = accent)
+                            Icon(bookIconForKey(book.iconKey), contentDescription = null, tint = displayAccent)
                             Text(book.title, maxLines = 1)
                         }
                     },
@@ -213,7 +222,7 @@ fun BookDetailScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Rounded.LibraryBooks, contentDescription = null, modifier = Modifier.size(40.dp), tint = accent)
+                                Icon(Icons.AutoMirrored.Rounded.LibraryBooks, contentDescription = null, modifier = Modifier.size(40.dp), tint = displayAccent)
                                 Text("কোনো অধ্যায় যোগ করা হয়নি", style = MaterialTheme.typography.titleMedium)
                                 Text(
                                     "নিচের 'নতুন অধ্যায়' বোতামে ট্যাপ করে অধ্যায় তৈরি করুন ও নোট যোগ করুন।",
@@ -279,7 +288,7 @@ fun BookDetailScreen(
                                 LinearProgressIndicator(
                                     progress = { progress },
                                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)),
-                                    color = accent
+                                    color = displayAccent
                                 )
                             }
                         }

@@ -50,18 +50,22 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = this
             val scope = rememberCoroutineScope()
+            val prefs = remember { context.getSharedPreferences("revision_alarm_prefs", MODE_PRIVATE) }
             val auth = remember { Firebase.auth }
             val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
-            var localOnlyMode by remember { mutableStateOf(false) }
+            var localOnlyMode by remember { mutableStateOf(prefs.getBoolean("skip_login", false)) }
 
             LaunchedEffect(Unit) {
-                if (auth.currentUser == null) {
+                if (auth.currentUser == null && !localOnlyMode) {
                     val cm = CredentialManager.create(context)
                     attemptAutoSignIn(
                         context = context,
                         credentialManager = cm,
                         scope = scope,
-                        onAuthSuccess = { localOnlyMode = false },
+                        onAuthSuccess = {
+                            prefs.edit().putBoolean("skip_login", false).apply()
+                            localOnlyMode = false
+                        },
                         onUnauthenticated = { }
                     )
                 }
@@ -70,8 +74,14 @@ class MainActivity : ComponentActivity() {
             if (currentUser == null && !localOnlyMode) {
                 RevisionAlarmTheme {
                     AuthScreen(
-                        onAuthSuccess = { localOnlyMode = false },
-                        onContinueWithoutLogin = { localOnlyMode = true }
+                        onAuthSuccess = {
+                            prefs.edit().putBoolean("skip_login", false).apply()
+                            localOnlyMode = false
+                        },
+                        onContinueWithoutLogin = {
+                            prefs.edit().putBoolean("skip_login", true).apply()
+                            localOnlyMode = true
+                        }
                     )
                 }
             } else {
@@ -110,7 +120,10 @@ class MainActivity : ComponentActivity() {
                                 vm = vm,
                                 state = state,
                                 currentUser = currentUser,
-                                onSignedOut = { localOnlyMode = false }
+                                onSignedOut = {
+                                    prefs.edit().putBoolean("skip_login", false).apply()
+                                    localOnlyMode = false
+                                }
                             )
 
                             state.activePopup?.let { popup ->

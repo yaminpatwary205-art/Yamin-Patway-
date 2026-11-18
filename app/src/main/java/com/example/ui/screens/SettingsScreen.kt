@@ -67,9 +67,15 @@ fun SettingsScreen(
     AnimatedMeshBackground {
         Scaffold(
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
             topBar = {
                 TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                        actionIconContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
                     navigationIcon = {
                         IconButton(onClick = onBack, modifier = Modifier.testTag("back_from_settings")) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান")
@@ -88,8 +94,17 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 statusMessage?.let { msg ->
-                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                        Text(msg, modifier = Modifier.padding(12.dp).fillMaxWidth(), style = MaterialTheme.typography.bodySmall)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ) {
+                        Text(
+                            msg,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
 
@@ -107,7 +122,12 @@ fun SettingsScreen(
                                         modifier = Modifier.size(48.dp).clip(CircleShape)
                                     )
                                 } else {
-                                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(48.dp)) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(48.dp)
+                                    ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(Icons.Rounded.Person, contentDescription = null)
                                         }

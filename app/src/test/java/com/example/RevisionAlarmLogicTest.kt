@@ -215,6 +215,9 @@ class RevisionAlarmLogicTest {
         repo.duplicateNote(note1)
         assertEquals(2, dao.getAllNotesOnce().size)
 
+        repo.addMultipleNotes(bookId, swapped[0].id, "তৃতীয় নোট\nচতুর্থ নোট", starred = false)
+        assertEquals(4, dao.getAllNotesOnce().size)
+
         repo.moveNoteToChapter(note1, swapped[1])
         val moved = dao.getNoteById(note1.id)!!
         assertEquals(swapped[1].id, moved.chapterId)

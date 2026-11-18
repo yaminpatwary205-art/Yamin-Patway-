@@ -6,6 +6,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.DriveFileMove
+import androidx.compose.material.icons.automirrored.rounded.NoteAdd
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +23,7 @@ import com.example.data.local.ChapterEntity
 import com.example.data.local.NoteEntity
 import com.example.ui.components.AnimatedMeshBackground
 import com.example.ui.components.GlassCard
+import com.example.ui.components.adaptiveAccent
 import com.example.ui.components.parseColorHex
 import kotlinx.coroutines.launch
 
@@ -36,6 +39,7 @@ fun ChapterDetailScreen(
 ) {
     val scope = rememberCoroutineScope()
     val accent = parseColorHex(book.colorHex)
+    val displayAccent = adaptiveAccent(accent)
 
     var showAddNote by remember { mutableStateOf(false) }
     var editingNote by remember { mutableStateOf<NoteEntity?>(null) }
@@ -47,9 +51,15 @@ fun ChapterDetailScreen(
     AnimatedMeshBackground {
         Scaffold(
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
             topBar = {
                 TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                        actionIconContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
                     navigationIcon = {
                         IconButton(onClick = onBack, modifier = Modifier.testTag("back_from_chapter")) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান")
@@ -76,7 +86,12 @@ fun ChapterDetailScreen(
             },
             bottomBar = {
                 if (bulkMode && selectedIds.isNotEmpty()) {
-                    Surface(tonalElevation = 6.dp, modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        tonalElevation = 6.dp,
+                        modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                    ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -135,7 +150,7 @@ fun ChapterDetailScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(40.dp), tint = accent)
+                                Icon(Icons.AutoMirrored.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(40.dp), tint = displayAccent)
                                 Text("এই অধ্যায়ে এখনো কোনো নোট নেই", style = MaterialTheme.typography.titleMedium)
                                 Text(
                                     "নোট যোগ করলে নির্ধারিত সময় পরপর অ্যালার্ম হিসেবে স্ক্রিনে দেখাবে।",
@@ -180,7 +195,7 @@ fun ChapterDetailScreen(
                                         Icon(
                                             if (note.starred) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                                             contentDescription = "তারকা",
-                                            tint = if (note.starred) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant
+                                            tint = if (note.starred) adaptiveAccent(Color(0xFFF59E0B)) else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
@@ -212,7 +227,7 @@ fun ChapterDetailScreen(
                                         }
                                         if (allChaptersInBook.size > 1) {
                                             IconButton(onClick = { movingNote = note }) {
-                                                Icon(Icons.Rounded.DriveFileMove, contentDescription = "অন্য অধ্যায়ে নিন", modifier = Modifier.size(20.dp))
+                                                Icon(Icons.AutoMirrored.Rounded.DriveFileMove, contentDescription = "অন্য অধ্যায়ে নিন", modifier = Modifier.size(20.dp))
                                             }
                                         }
                                         IconButton(onClick = {
@@ -233,6 +248,7 @@ fun ChapterDetailScreen(
     if (showAddNote || editingNote != null) {
         var content by remember(editingNote) { mutableStateOf(editingNote?.content.orEmpty()) }
         var starred by remember(editingNote) { mutableStateOf(editingNote?.starred ?: false) }
+        var multipleMode by remember(editingNote) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { showAddNote = false; editingNote = null },
             title = { Text(if (editingNote == null) "নতুন নোট যোগ করুন" else "নোট সম্পাদনা") },
@@ -241,10 +257,27 @@ fun ChapterDetailScreen(
                     OutlinedTextField(
                         value = content,
                         onValueChange = { content = it },
-                        label = { Text("নোটের বিষয়বস্তু (বাংলা বা ইংরেজি)") },
-                        minLines = 3,
+                        label = {
+                            Text(
+                                if (multipleMode && editingNote == null)
+                                    "প্রতি লাইনে একটি করে একাধিক নোট লিখুন"
+                                else
+                                    "নোটের বিষয়বস্তু (বাংলা বা ইংরেজি)"
+                            )
+                        },
+                        minLines = if (multipleMode) 5 else 3,
                         modifier = Modifier.fillMaxWidth().testTag("note_content_input")
                     )
+                    if (editingNote == null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = multipleMode,
+                                onCheckedChange = { multipleMode = it },
+                                modifier = Modifier.testTag("multiple_notes_checkbox")
+                            )
+                            Text("একাধিক নোট একসাথে যোগ করুন (প্রতি লাইনে ১টি নোট)")
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = starred, onCheckedChange = { starred = it })
                         Text("গুরুত্বপূর্ণ (Starred)")
@@ -256,8 +289,12 @@ fun ChapterDetailScreen(
                     onClick = {
                         val existing = editingNote
                         scope.launch {
-                            if (existing == null) repository.addNote(book.id, chapter.id, content, starred)
-                            else repository.updateNote(existing.copy(content = content, starred = starred))
+                            if (existing == null) {
+                                if (multipleMode) repository.addMultipleNotes(book.id, chapter.id, content, starred)
+                                else repository.addNote(book.id, chapter.id, content, starred)
+                            } else {
+                                repository.updateNote(existing.copy(content = content, starred = starred))
+                            }
                         }
                         showAddNote = false
                         editingNote = null

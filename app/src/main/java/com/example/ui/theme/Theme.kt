@@ -1,14 +1,25 @@
 package com.example.ui.theme
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+
+val LocalIsDarkTheme = staticCompositionLocalOf { false }
 
 private val LightColors = lightColorScheme(
     primary = IndigoPrimary,
@@ -20,7 +31,7 @@ private val LightColors = lightColorScheme(
     secondaryContainer = Color(0xFFFFE4E6),
     onSecondaryContainer = Color(0xFF4C0519),
     tertiary = AmberAccent,
-    onTertiary = Color(0xFF1F1600),
+    onTertiary = Color.White,
     tertiaryContainer = Color(0xFFFEF3C7),
     onTertiaryContainer = Color(0xFF451A03),
     background = LightBackground,
@@ -29,9 +40,16 @@ private val LightColors = lightColorScheme(
     onSurface = LightOnSurface,
     surfaceVariant = LightSurfaceVariant,
     onSurfaceVariant = LightOnSurfaceVariant,
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF8FAFF),
+    surfaceContainer = Color(0xFFF1F4FC),
+    surfaceContainerHigh = Color(0xFFEAEFFA),
+    surfaceContainerHighest = Color(0xFFE2E8F6),
     outline = LightOutline,
     error = RoseError,
-    onError = Color.White
+    onError = Color.White,
+    errorContainer = Color(0xFFFEE2E2),
+    onErrorContainer = Color(0xFF7F1D1D)
 )
 
 private val DarkColors = darkColorScheme(
@@ -53,9 +71,16 @@ private val DarkColors = darkColorScheme(
     onSurface = DarkOnSurface,
     surfaceVariant = DarkSurfaceVariant,
     onSurfaceVariant = DarkOnSurfaceVariant,
+    surfaceContainerLowest = Color(0xFF090C18),
+    surfaceContainerLow = Color(0xFF11162B),
+    surfaceContainer = Color(0xFF171D36),
+    surfaceContainerHigh = Color(0xFF1E2544),
+    surfaceContainerHighest = Color(0xFF262E52),
     outline = DarkOutline,
     error = Color(0xFFF87171),
-    onError = Color(0xFF3B0909)
+    onError = Color(0xFF3B0909),
+    errorContainer = Color(0xFF5C1515),
+    onErrorContainer = Color(0xFFFEE2E2)
 )
 
 val AppShapes = Shapes(
@@ -64,6 +89,12 @@ val AppShapes = Shapes(
     large = RoundedCornerShape(24.dp),
     extraLarge = RoundedCornerShape(30.dp)
 )
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 @Composable
 fun RevisionAlarmTheme(
@@ -75,10 +106,30 @@ fun RevisionAlarmTheme(
         "light" -> false
         else -> isSystemInDarkTheme()
     }
+    val colorScheme = if (useDark) DarkColors else LightColors
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = view.context.findActivity()?.window
+            if (window != null) {
+                WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = !useDark
+                    isAppearanceLightNavigationBars = !useDark
+                }
+            }
+        }
+    }
+
     MaterialTheme(
-        colorScheme = if (useDark) DarkColors else LightColors,
+        colorScheme = colorScheme,
         typography = AppTypography,
-        shapes = AppShapes,
-        content = content
-    )
+        shapes = AppShapes
+    ) {
+        CompositionLocalProvider(
+            LocalIsDarkTheme provides useDark,
+            LocalContentColor provides colorScheme.onBackground,
+            content = content
+        )
+    }
 }
+

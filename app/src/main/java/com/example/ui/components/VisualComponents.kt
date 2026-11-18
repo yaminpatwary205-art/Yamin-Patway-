@@ -9,11 +9,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import com.example.ui.theme.LocalIsDarkTheme
+import com.example.ui.theme.readableAccentColor
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -84,7 +88,7 @@ fun AnimatedMeshBackground(
             val h = size.height
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(primary.copy(alpha = 0.22f), Color.Transparent),
+                    colors = listOf(primary.copy(alpha = 0.15f), Color.Transparent),
                     center = Offset(w * (0.15f + 0.25f * drift1), h * (0.12f + 0.1f * drift2)),
                     radius = w * 0.72f
                 ),
@@ -93,7 +97,7 @@ fun AnimatedMeshBackground(
             )
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(secondary.copy(alpha = 0.16f), Color.Transparent),
+                    colors = listOf(secondary.copy(alpha = 0.11f), Color.Transparent),
                     center = Offset(w * (0.85f - 0.2f * drift2), h * (0.45f + 0.18f * drift1)),
                     radius = w * 0.65f
                 ),
@@ -102,7 +106,7 @@ fun AnimatedMeshBackground(
             )
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(tertiary.copy(alpha = 0.14f), Color.Transparent),
+                    colors = listOf(tertiary.copy(alpha = 0.10f), Color.Transparent),
                     center = Offset(w * (0.3f + 0.35f * drift2), h * (0.88f - 0.12f * drift1)),
                     radius = w * 0.6f
                 ),
@@ -110,8 +114,15 @@ fun AnimatedMeshBackground(
                 center = Offset(w * (0.3f + 0.35f * drift2), h * (0.88f - 0.12f * drift1))
             )
         }
-        content()
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+            content()
+        }
     }
+}
+
+@Composable
+fun adaptiveAccent(accent: Color): Color {
+    return readableAccentColor(accent, LocalIsDarkTheme.current)
 }
 
 @Composable
@@ -122,11 +133,12 @@ fun GlassCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val surfaceColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f)
+    val surfaceColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+    val onSurface = MaterialTheme.colorScheme.onSurface
     val borderBrush = Brush.linearGradient(
         colors = listOf(
-            accentColor.copy(alpha = 0.35f),
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+            adaptiveAccent(accentColor).copy(alpha = 0.40f),
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
         )
     )
     if (onClick != null) {
@@ -135,6 +147,7 @@ fun GlassCard(
             modifier = modifier,
             shape = RoundedCornerShape(cornerRadius),
             color = surfaceColor,
+            contentColor = onSurface,
             tonalElevation = 2.dp,
             border = BorderStroke(1.dp, borderBrush)
         ) {
@@ -145,6 +158,7 @@ fun GlassCard(
             modifier = modifier,
             shape = RoundedCornerShape(cornerRadius),
             color = surfaceColor,
+            contentColor = onSurface,
             tonalElevation = 2.dp,
             border = BorderStroke(1.dp, borderBrush)
         ) {
@@ -166,7 +180,8 @@ fun AnimatedProgressRing(
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "ring_progress"
     )
-    val trackColor = color.copy(alpha = 0.16f)
+    val resolvedColor = adaptiveAccent(color)
+    val trackColor = resolvedColor.copy(alpha = 0.20f)
 
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(size)) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -183,7 +198,7 @@ fun AnimatedProgressRing(
                 style = stroke
             )
             drawArc(
-                color = color,
+                color = resolvedColor,
                 startAngle = -90f,
                 sweepAngle = 360f * animatedProgress,
                 useCenter = false,
@@ -284,7 +299,7 @@ fun parseColorHex(hex: String, fallback: Color = Color(0xFF4F46E5)): Color {
 fun bookIconForKey(iconKey: String): ImageVector = when (iconKey) {
     "auto_stories" -> Icons.Rounded.AutoStories
     "edit_note" -> Icons.Rounded.EditNote
-    "menu_book" -> Icons.Rounded.MenuBook
+    "menu_book" -> Icons.AutoMirrored.Rounded.MenuBook
     "spellcheck" -> Icons.Rounded.Spellcheck
     "calculate" -> Icons.Rounded.Calculate
     "science" -> Icons.Rounded.Science

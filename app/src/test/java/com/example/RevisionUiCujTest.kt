@@ -14,6 +14,7 @@ import com.example.ui.ActivePopup
 import com.example.ui.RevisionUiState
 import com.example.ui.RevisionViewModel
 import com.example.ui.components.RevisionPopupOverlay
+import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.RevisionAlarmTheme
 import com.google.firebase.FirebaseApp
@@ -106,6 +107,22 @@ class RevisionUiCujTest {
         // Switch to Section C: Vocabulary
         composeRule.onNodeWithTag("tab_section_2").performClick()
         composeRule.onNodeWithText("Unit 1 Words").assertIsDisplayed()
+    }
+
+    @Test
+    fun `auth screen has Skip button allowing users without Google account to enter`() {
+        var skipped = false
+        composeRule.setContent {
+            RevisionAlarmTheme {
+                AuthScreen(
+                    onAuthSuccess = {},
+                    onContinueWithoutLogin = { skipped = true }
+                )
+            }
+        }
+        composeRule.onNodeWithTag("skip_login_top_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("continue_local_button").performScrollTo().assertIsDisplayed().performClick()
+        assertTrue(skipped)
     }
 
     @Test
@@ -216,6 +233,10 @@ class RevisionUiCujTest {
         val firstWord = (viewModel.uiState.value.activePopup as ActivePopup.VocabPopup).word
         val expectedOtherWord = if (firstWord.id == w1.id) w2.word else w1.word
 
+        // Both English word AND Bengali meaning must be visible in front by default
+        composeRule.onNodeWithTag("vocab_front_word").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(firstWord.meaningBn).performScrollTo().assertIsDisplayed()
+
         composeRule.onNodeWithTag("vocab_typing_input").performScrollTo().performTextInput("wrong")
         composeRule.onNodeWithTag("vocab_check_button").performScrollTo().performClick()
 
@@ -230,4 +251,60 @@ class RevisionUiCujTest {
         }
         composeRule.onNodeWithText(expectedOtherWord).assertIsDisplayed()
     }
+
+    @Test
+    fun `dark and light themes provide high-contrast LocalContentColor and readable subject accents`() {
+        var darkContentColor = androidx.compose.ui.graphics.Color.Unspecified
+        var darkCardContentColor = androidx.compose.ui.graphics.Color.Unspecified
+        var darkSurfaceColor = androidx.compose.ui.graphics.Color.Unspecified
+
+        composeRule.setContent {
+            RevisionAlarmTheme(themeMode = "dark") {
+                darkContentColor = androidx.compose.material3.LocalContentColor.current
+                darkSurfaceColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
+                com.example.ui.components.AnimatedMeshBackground {
+                    com.example.ui.components.GlassCard {
+                        darkCardContentColor = androidx.compose.material3.LocalContentColor.current
+                    }
+                }
+            }
+        }
+
+        assertNotEquals(androidx.compose.ui.graphics.Color.Black, darkContentColor)
+        assertNotEquals(androidx.compose.ui.graphics.Color.Black, darkCardContentColor)
+        assertTrue(
+            "Dark card text contrast must be high",
+            contrastRatio(darkCardContentColor, darkSurfaceColor) >= 10.0
+        )
+
+        com.example.ui.theme.SubjectColors.forEach { hex ->
+            val raw = com.example.ui.components.parseColorHex(hex)
+            val onDark = com.example.ui.theme.readableAccentColor(raw, isDark = true)
+            val onLight = com.example.ui.theme.readableAccentColor(raw, isDark = false)
+            assertTrue(
+                "Accent $hex on dark surface must have >= 4.5 contrast",
+                contrastRatio(onDark, com.example.ui.theme.DarkSurface) >= 4.5
+            )
+            assertTrue(
+                "Accent $hex on light surface must have >= 4.5 contrast",
+                contrastRatio(onLight, com.example.ui.theme.LightSurface) >= 4.5
+            )
+        }
+    }
+
+    private fun contrastRatio(fg: androidx.compose.ui.graphics.Color, bg: androidx.compose.ui.graphics.Color): Double {
+        fun lum(c: androidx.compose.ui.graphics.Color): Double {
+            fun ch(v: Float): Double {
+                val d = v.toDouble()
+                return if (d <= 0.03928) d / 12.92 else Math.pow((d + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * ch(c.red) + 0.7152 * ch(c.green) + 0.0722 * ch(c.blue)
+        }
+        val l1 = lum(fg)
+        val l2 = lum(bg)
+        val lighter = maxOf(l1, l2)
+        val darker = minOf(l1, l2)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
 }
+

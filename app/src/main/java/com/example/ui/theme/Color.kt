@@ -1,30 +1,32 @@
 package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 
 // Primary Brand Palette — Deep Indigo & Radiant Amber/Coral
-val IndigoPrimary = Color(0xFF4F46E5)
-val IndigoLightPrimary = Color(0xFF818CF8)
-val AmberAccent = Color(0xFFF59E0B)
-val CoralSecondary = Color(0xFFF43F5E)
-val EmeraldSuccess = Color(0xFF10B981)
-val RoseError = Color(0xFFEF4444)
+val IndigoPrimary = Color(0xFF4338CA)
+val IndigoLightPrimary = Color(0xFFA5B4FC)
+val AmberAccent = Color(0xFFD97706)
+val CoralSecondary = Color(0xFFE11D48)
+val EmeraldSuccess = Color(0xFF059669)
+val RoseError = Color(0xFFDC2626)
 
-// Light Theme Surfaces (Soft Luminous Pastel Mesh)
-val LightBackground = Color(0xFFF6F7FC)
+// Light Theme Surfaces (Soft Luminous Pastel Mesh with High Contrast Text)
+val LightBackground = Color(0xFFF5F7FC)
 val LightSurface = Color(0xFFFFFFFF)
-val LightSurfaceVariant = Color(0xFFEEF1FB)
-val LightOnSurface = Color(0xFF131528)
-val LightOnSurfaceVariant = Color(0xFF565B7A)
-val LightOutline = Color(0xFFD9DFF2)
+val LightSurfaceVariant = Color(0xFFE8ECF8)
+val LightOnSurface = Color(0xFF0F172A)
+val LightOnSurfaceVariant = Color(0xFF334155)
+val LightOutline = Color(0xFFCBD5E1)
 
-// Dark Theme Surfaces (Deep Midnight Glass)
+// Dark Theme Surfaces (Deep Midnight Glass with Crisp Luminous Text)
 val DarkBackground = Color(0xFF0B0E1D)
-val DarkSurface = Color(0xFF14182E)
-val DarkSurfaceVariant = Color(0xFF1E2442)
-val DarkOnSurface = Color(0xFFF3F5FF)
-val DarkOnSurfaceVariant = Color(0xFFA7B0D6)
-val DarkOutline = Color(0xFF2B3258)
+val DarkSurface = Color(0xFF151A30)
+val DarkSurfaceVariant = Color(0xFF22294A)
+val DarkOnSurface = Color(0xFFF8FAFC)
+val DarkOnSurfaceVariant = Color(0xFFCBD5E1)
+val DarkOutline = Color(0xFF3B4570)
 
 // Subject Palette Options
 val SubjectColors = listOf(
@@ -40,3 +42,46 @@ val SubjectColors = listOf(
     "#0D9488", // Teal
     "#0284C7"  // Sky
 )
+
+/**
+ * Adjusts vibrant subject/status accent colors so foreground text & icons always maintain
+ * WCAG AA (>= 4.5:1) contrast on both dark (#151A30) and light (#FFFFFF) card surfaces.
+ */
+fun readableAccentColor(accent: Color, isDark: Boolean): Color {
+    return if (isDark) {
+        // Target luminance >= 0.30 so contrast vs DarkSurface (#151A30) is >= 5.0:1
+        if (accent.luminance() >= 0.30f) return accent
+        var low = 0f
+        var high = 1f
+        var best = Color.White
+        repeat(8) {
+            val mid = (low + high) / 2f
+            val candidate = lerp(accent, Color.White, mid)
+            if (candidate.luminance() >= 0.32f) {
+                best = candidate
+                high = mid
+            } else {
+                low = mid
+            }
+        }
+        best
+    } else {
+        // Target luminance <= 0.16 so contrast vs LightSurface (#FFFFFF) is >= 4.9:1
+        if (accent.luminance() <= 0.16f) return accent
+        var low = 0f
+        var high = 1f
+        var best = Color.Black
+        repeat(8) {
+            val mid = (low + high) / 2f
+            val candidate = lerp(accent, Color.Black, mid)
+            if (candidate.luminance() <= 0.155f) {
+                best = candidate
+                high = mid
+            } else {
+                low = mid
+            }
+        }
+        best
+    }
+}
+

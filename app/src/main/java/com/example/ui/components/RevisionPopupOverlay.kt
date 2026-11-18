@@ -50,22 +50,23 @@ fun RevisionPopupOverlay(
 
     val gradientColors = when (popup) {
         is ActivePopup.NotePopup -> {
-            val accent = parseColorHex(popup.book.colorHex)
-            listOf(accent.copy(alpha = 0.25f), MaterialTheme.colorScheme.background)
+            val accent = adaptiveAccent(parseColorHex(popup.book.colorHex))
+            listOf(accent.copy(alpha = 0.18f), MaterialTheme.colorScheme.background)
         }
-        is ActivePopup.ParagraphPopup -> listOf(Color(0xFF2563EB).copy(alpha = 0.24f), MaterialTheme.colorScheme.background)
-        is ActivePopup.VocabPopup -> listOf(Color(0xFF7C3AED).copy(alpha = 0.24f), MaterialTheme.colorScheme.background)
+        is ActivePopup.ParagraphPopup -> listOf(adaptiveAccent(Color(0xFF2563EB)).copy(alpha = 0.18f), MaterialTheme.colorScheme.background)
+        is ActivePopup.VocabPopup -> listOf(adaptiveAccent(Color(0xFF7C3AED)).copy(alpha = 0.18f), MaterialTheme.colorScheme.background)
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .background(Brush.verticalGradient(gradientColors))
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(16.dp)
-            .testTag("revision_popup_overlay")
-    ) {
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .background(Brush.verticalGradient(gradientColors))
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(16.dp)
+                .testTag("revision_popup_overlay")
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -139,6 +140,7 @@ fun RevisionPopupOverlay(
                 )
             }
         }
+        }
     }
 }
 
@@ -150,6 +152,8 @@ private fun NotePopupContent(
     onToggleStar: () -> Unit
 ) {
     val accent = parseColorHex(popup.book.colorHex)
+    val displayAccent = adaptiveAccent(accent)
+    val starColor = adaptiveAccent(Color(0xFFF59E0B))
     var starred by remember(popup.note.id) { mutableStateOf(popup.note.starred) }
 
     GlassCard(
@@ -164,7 +168,8 @@ private fun NotePopupContent(
             ) {
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = accent.copy(alpha = 0.16f)
+                    color = displayAccent.copy(alpha = 0.16f),
+                    contentColor = displayAccent
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -174,13 +179,13 @@ private fun NotePopupContent(
                         Icon(
                             imageVector = bookIconForKey(popup.book.iconKey),
                             contentDescription = null,
-                            tint = accent,
+                            tint = displayAccent,
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
                             text = popup.book.title,
                             style = MaterialTheme.typography.labelLarge,
-                            color = accent
+                            color = displayAccent
                         )
                     }
                 }
@@ -192,7 +197,7 @@ private fun NotePopupContent(
                     Icon(
                         imageVector = if (starred) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                         contentDescription = "গুরুত্বপূর্ণ তারকা",
-                        tint = if (starred) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (starred) starColor else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -205,7 +210,8 @@ private fun NotePopupContent(
 
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
@@ -234,7 +240,10 @@ private fun NotePopupContent(
                 .height(54.dp)
                 .testTag("note_popup_done_button"),
             shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF059669),
+                contentColor = Color.White
+            )
         ) {
             Icon(Icons.Rounded.CheckCircle, contentDescription = null)
             Spacer(Modifier.width(8.dp))
@@ -313,11 +322,13 @@ private fun ParagraphPopupContent(
                 )
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.primaryContainer
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ) {
                     Text(
                         text = "লাইন ${popup.lineIndex + 1} / ${popup.paragraph.lines.size}",
                         style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
                 }
@@ -333,7 +344,8 @@ private fun ParagraphPopupContent(
 
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
@@ -379,9 +391,12 @@ private fun ParagraphPopupContent(
                 }
             } else {
                 val res = popup.checkResult
+                val passColor = adaptiveAccent(Color(0xFF059669))
+                val failColor = adaptiveAccent(Color(0xFFDC2626))
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -389,14 +404,14 @@ private fun ParagraphPopupContent(
                             text = "সঠিকতার হার: ${res.accuracyPercent}%",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (res.accuracyPercent >= 80) Color(0xFF10B981) else Color(0xFFEF4444)
+                            color = if (res.accuracyPercent >= 80) passColor else failColor
                         )
                         Text(
                             text = buildAnnotatedString {
                                 res.tokens.forEachIndexed { i, token ->
                                     withStyle(
                                         SpanStyle(
-                                            color = if (token.correct) Color(0xFF10B981) else Color(0xFFEF4444),
+                                            color = if (token.correct) passColor else failColor,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     ) {
@@ -438,7 +453,10 @@ private fun ParagraphPopupContent(
                 onClick = { viewModel.completeParagraphLineAndClose() },
                 modifier = Modifier.weight(1f).height(48.dp),
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF059669),
+                    contentColor = Color.White
+                )
             ) {
                 Text("পরে পরেরটি", color = Color.White)
             }
@@ -481,6 +499,8 @@ private fun VocabPopupContent(
         }
     }
 
+    val vocabAccent = adaptiveAccent(Color(0xFF7C3AED))
+
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -497,13 +517,18 @@ private fun VocabPopupContent(
                     text = popup.list.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF7C3AED)
+                    color = vocabAccent
                 )
                 if (popup.list.reverseMode) {
-                    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.secondaryContainer) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
                         Text(
                             text = "রিভার্স মোড",
                             style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                     }
@@ -511,13 +536,32 @@ private fun VocabPopupContent(
             }
 
             if (!popup.list.reverseMode || checkedCorrect != null) {
-                Text(
-                    text = popup.word.word,
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth()
-                )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "ইংরেজি শব্দ",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = popup.word.word,
+                            style = MaterialTheme.typography.displaySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().testTag("vocab_front_word")
+                        )
+                    }
+                }
             } else {
                 Text(
                     text = "বাংলা অর্থ দেখে ইংরেজি শব্দটি লিখুন",
@@ -539,7 +583,12 @@ private fun VocabPopupContent(
             OutlinedTextField(
                 value = typedWord,
                 onValueChange = { typedWord = it },
-                label = { Text("ইংরেজি বানান লিখুন") },
+                label = {
+                    Text(
+                        if (!popup.list.reverseMode) "ওপরের ইংরেজি শব্দটি দেখে টাইপ করুন"
+                        else "ইংরেজি বানান লিখুন"
+                    )
+                },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -547,10 +596,15 @@ private fun VocabPopupContent(
             )
 
             AnimatedVisibility(visible = checkedCorrect != null) {
+                val feedbackAccent = if (checkedCorrect == true) {
+                    adaptiveAccent(Color(0xFF059669))
+                } else {
+                    adaptiveAccent(Color(0xFFDC2626))
+                }
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = if (checkedCorrect == true) Color(0xFF10B981).copy(alpha = 0.16f)
-                    else Color(0xFFEF4444).copy(alpha = 0.16f),
+                    color = feedbackAccent.copy(alpha = 0.16f),
+                    contentColor = feedbackAccent,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
@@ -559,7 +613,7 @@ private fun VocabPopupContent(
                         } else {
                             "ভুল হয়েছে! সঠিক বানান: ${popup.word.word} (Weak Words-এ যোগ হয়েছে)"
                         },
-                        color = if (checkedCorrect == true) Color(0xFF059669) else Color(0xFFDC2626),
+                        color = feedbackAccent,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(12.dp)
                     )
@@ -604,7 +658,10 @@ private fun VocabPopupContent(
                 },
                 modifier = Modifier.weight(1f).height(48.dp).testTag("vocab_next_button"),
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF6D28D9),
+                    contentColor = Color.White
+                )
             ) {
                 Text("পরবর্তী", color = Color.White)
             }
@@ -638,10 +695,11 @@ private fun TranslationBox(
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (translationState) {
@@ -656,12 +714,13 @@ private fun TranslationBox(
                     Text(
                         text = "বাংলা অর্থ:",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                     )
                     Text(
                         text = translationState.meaningBn,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
                 is PopupTranslationState.Error -> {
