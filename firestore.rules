@@ -1,0 +1,402 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: deny all reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidCreateTimestamps(data) {
+      return data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidUpdateTimestamps(data) {
+      return data.createdAt == existing().createdAt &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.userId == userId &&
+             data.displayName is string && data.displayName.size() <= 100 &&
+             data.email is string && data.email.size() <= 150 &&
+             data.themeMode in ['system', 'light', 'dark'] &&
+             data.soundEnabled is bool &&
+             data.alarmVolume is number && data.alarmVolume >= 0.0 && data.alarmVolume <= 1.0 &&
+             data.vibrationEnabled is bool &&
+             data.defaultSnoozeMinutes is int && data.defaultSnoozeMinutes >= 1 && data.defaultSnoozeMinutes <= 120 &&
+             data.vocabOrderMode in ['ordered', 'random'] &&
+             data.streakCount is int && data.streakCount >= 0 && data.streakCount <= 100000 &&
+             data.lastActiveDay is string && data.lastActiveDay.size() <= 20 &&
+             data.todayRevisionCount is int && data.todayRevisionCount >= 0 && data.todayRevisionCount <= 100000 &&
+             data.todayDate is string && data.todayDate.size() <= 20 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    function isValidBook(data, userId) {
+      return data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.colorHex is string && data.colorHex.size() >= 4 && data.colorHex.size() <= 12 &&
+             data.iconKey is string && data.iconKey.size() >= 1 && data.iconKey.size() <= 40 &&
+             data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 100 &&
+             data.enabled is bool &&
+             data.intervalMinutes is int && data.intervalMinutes >= 1 && data.intervalMinutes <= 1440 &&
+             data.useActiveHours is bool &&
+             data.activeStartMinutes is int && data.activeStartMinutes >= 0 && data.activeStartMinutes <= 1439 &&
+             data.activeEndMinutes is int && data.activeEndMinutes >= 0 && data.activeEndMinutes <= 1439 &&
+             data.examDateEpochMs is int && data.examDateEpochMs >= 0 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    function isValidChapter(data, userId) {
+      return data.userId == userId &&
+             isValidId(data.bookId) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 10000 &&
+             data.overrideEnabled is int && data.overrideEnabled >= -1 && data.overrideEnabled <= 1 &&
+             data.overrideIntervalMinutes is int && data.overrideIntervalMinutes >= 0 && data.overrideIntervalMinutes <= 1440 &&
+             data.useActiveHours is int && data.useActiveHours >= -1 && data.useActiveHours <= 1 &&
+             data.activeStartMinutes is int && data.activeStartMinutes >= 0 && data.activeStartMinutes <= 1439 &&
+             data.activeEndMinutes is int && data.activeEndMinutes >= 0 && data.activeEndMinutes <= 1439 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    function isValidNote(data, userId) {
+      return data.userId == userId &&
+             isValidId(data.bookId) &&
+             isValidId(data.chapterId) &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 5000 &&
+             data.starred is bool &&
+             data.overrideEnabled is int && data.overrideEnabled >= -1 && data.overrideEnabled <= 1 &&
+             data.overrideIntervalMinutes is int && data.overrideIntervalMinutes >= 0 && data.overrideIntervalMinutes <= 1440 &&
+             data.revisionCount is int && data.revisionCount >= 0 && data.revisionCount <= 1000000 &&
+             data.lastRevisedEpochMs is int && data.lastRevisedEpochMs >= 0 &&
+             data.lastRevisedDay is string && data.lastRevisedDay.size() <= 20 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    function isValidParagraphFile(data, userId) {
+      return data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+             data.rawText is string && data.rawText.size() >= 1 && data.rawText.size() <= 15000 &&
+             data.lines is list && data.lines.size() >= 1 && data.lines.size() <= 300 &&
+             data.lines[0] is string &&
+             data.currentLineIndex is int && data.currentLineIndex >= 0 && data.currentLineIndex <= 300 &&
+             data.enabled is bool &&
+             data.intervalMinutes is int && data.intervalMinutes >= 1 && data.intervalMinutes <= 1440 &&
+             data.memoryMode is bool &&
+             data.lastTriggeredEpochMs is int && data.lastTriggeredEpochMs >= 0 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    function isValidVocabList(data, userId) {
+      return data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+             data.enabled is bool &&
+             data.intervalMinutes is int && data.intervalMinutes >= 1 && data.intervalMinutes <= 1440 &&
+             data.reverseMode is bool &&
+             data.lastTriggeredEpochMs is int && data.lastTriggeredEpochMs >= 0 &&
+             data.currentIndex is int && data.currentIndex >= 0 && data.currentIndex <= 10000 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    function isValidVocabWord(data, userId) {
+      return data.userId == userId &&
+             isValidId(data.listId) &&
+             data.word is string && data.word.size() >= 1 && data.word.size() <= 120 &&
+             data.meaningBn is string && data.meaningBn.size() <= 300 &&
+             data.enabled is bool &&
+             data.mastered is bool &&
+             data.weakCount is int && data.weakCount >= 0 && data.weakCount <= 100000 &&
+             data.practiceCount is int && data.practiceCount >= 0 && data.practiceCount <= 100000 &&
+             data.lastPracticedEpochMs is int && data.lastPracticedEpochMs >= 0 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    function isValidWeakWord(data, userId) {
+      return data.userId == userId &&
+             data.word is string && data.word.size() >= 1 && data.word.size() <= 120 &&
+             data.meaningBn is string && data.meaningBn.size() <= 300 &&
+             data.sourceType in ['paragraph', 'vocab'] &&
+             data.mistakeCount is int && data.mistakeCount >= 1 && data.mistakeCount <= 100000 &&
+             data.lastMistakeEpochMs is int && data.lastMistakeEpochMs >= 0 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    function isValidTranslationCache(data, userId) {
+      return data.userId == userId &&
+             data.sourceText is string && data.sourceText.size() >= 1 && data.sourceText.size() <= 1000 &&
+             data.sourceLang is string && data.sourceLang.size() >= 2 && data.sourceLang.size() <= 10 &&
+             data.targetLang is string && data.targetLang.size() >= 2 && data.targetLang.size() <= 10 &&
+             data.translatedText is string && data.translatedText.size() >= 1 && data.translatedText.size() <= 2000 &&
+             data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'displayName', 'email', 'themeMode', 'soundEnabled',
+                         'alarmVolume', 'vibrationEnabled', 'defaultSnoozeMinutes', 'vocabOrderMode',
+                         'streakCount', 'lastActiveDay', 'todayRevisionCount', 'todayDate',
+                         'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'email', 'themeMode', 'soundEnabled',
+                         'alarmVolume', 'vibrationEnabled', 'defaultSnoozeMinutes', 'vocabOrderMode',
+                         'streakCount', 'lastActiveDay', 'todayRevisionCount', 'todayDate',
+                         'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidCreateTimestamps(incoming()) &&
+                       isValidUserProfile(incoming(), userId);
+      allow update: if isOwner(userId) && isValidId(userId) &&
+                       incoming().userId == existing().userId &&
+                       isValidUpdateTimestamps(incoming()) &&
+                       isValidUserProfile(incoming(), userId) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName', 'email', 'themeMode', 'soundEnabled',
+                         'alarmVolume', 'vibrationEnabled', 'defaultSnoozeMinutes', 'vocabOrderMode',
+                         'streakCount', 'lastActiveDay', 'todayRevisionCount', 'todayDate',
+                         'updatedAtEpochMs', 'updatedAt'
+                       ]);
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /books/{bookId} {
+        allow get: if isOwner(userId) && isValidId(bookId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(bookId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'colorHex', 'iconKey', 'sortOrder', 'enabled',
+                           'intervalMinutes', 'useActiveHours', 'activeStartMinutes', 'activeEndMinutes',
+                           'examDateEpochMs', 'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'colorHex', 'iconKey', 'sortOrder', 'enabled',
+                           'intervalMinutes', 'useActiveHours', 'activeStartMinutes', 'activeEndMinutes',
+                           'examDateEpochMs', 'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCreateTimestamps(incoming()) &&
+                         isValidBook(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(bookId) &&
+                         incoming().userId == existing().userId &&
+                         isValidUpdateTimestamps(incoming()) &&
+                         isValidBook(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'colorHex', 'iconKey', 'sortOrder', 'enabled',
+                           'intervalMinutes', 'useActiveHours', 'activeStartMinutes', 'activeEndMinutes',
+                           'examDateEpochMs', 'updatedAtEpochMs', 'updatedAt'
+                         ]);
+        allow delete: if isOwner(userId) && isValidId(bookId);
+      }
+
+      match /chapters/{chapterId} {
+        allow get: if isOwner(userId) && isValidId(chapterId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(chapterId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'bookId', 'title', 'sortOrder', 'overrideEnabled',
+                           'overrideIntervalMinutes', 'useActiveHours', 'activeStartMinutes',
+                           'activeEndMinutes', 'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'bookId', 'title', 'sortOrder', 'overrideEnabled',
+                           'overrideIntervalMinutes', 'useActiveHours', 'activeStartMinutes',
+                           'activeEndMinutes', 'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCreateTimestamps(incoming()) &&
+                         isValidChapter(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(chapterId) &&
+                         incoming().userId == existing().userId &&
+                         isValidUpdateTimestamps(incoming()) &&
+                         isValidChapter(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'bookId', 'title', 'sortOrder', 'overrideEnabled',
+                           'overrideIntervalMinutes', 'useActiveHours', 'activeStartMinutes',
+                           'activeEndMinutes', 'updatedAtEpochMs', 'updatedAt'
+                         ]);
+        allow delete: if isOwner(userId) && isValidId(chapterId);
+      }
+
+      match /notes/{noteId} {
+        allow get: if isOwner(userId) && isValidId(noteId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(noteId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'bookId', 'chapterId', 'content', 'starred', 'overrideEnabled',
+                           'overrideIntervalMinutes', 'revisionCount', 'lastRevisedEpochMs',
+                           'lastRevisedDay', 'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'bookId', 'chapterId', 'content', 'starred', 'overrideEnabled',
+                           'overrideIntervalMinutes', 'revisionCount', 'lastRevisedEpochMs',
+                           'lastRevisedDay', 'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCreateTimestamps(incoming()) &&
+                         isValidNote(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(noteId) &&
+                         incoming().userId == existing().userId &&
+                         isValidUpdateTimestamps(incoming()) &&
+                         isValidNote(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'bookId', 'chapterId', 'content', 'starred', 'overrideEnabled',
+                           'overrideIntervalMinutes', 'revisionCount', 'lastRevisedEpochMs',
+                           'lastRevisedDay', 'updatedAtEpochMs', 'updatedAt'
+                         ]);
+        allow delete: if isOwner(userId) && isValidId(noteId);
+      }
+
+      match /paragraphs/{paragraphId} {
+        allow get: if isOwner(userId) && isValidId(paragraphId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(paragraphId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'rawText', 'lines', 'currentLineIndex', 'enabled',
+                           'intervalMinutes', 'memoryMode', 'lastTriggeredEpochMs',
+                           'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'rawText', 'lines', 'currentLineIndex', 'enabled',
+                           'intervalMinutes', 'memoryMode', 'lastTriggeredEpochMs',
+                           'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCreateTimestamps(incoming()) &&
+                         isValidParagraphFile(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(paragraphId) &&
+                         incoming().userId == existing().userId &&
+                         isValidUpdateTimestamps(incoming()) &&
+                         isValidParagraphFile(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'rawText', 'lines', 'currentLineIndex', 'enabled',
+                           'intervalMinutes', 'memoryMode', 'lastTriggeredEpochMs',
+                           'updatedAtEpochMs', 'updatedAt'
+                         ]);
+        allow delete: if isOwner(userId) && isValidId(paragraphId);
+      }
+
+      match /vocab_lists/{listId} {
+        allow get: if isOwner(userId) && isValidId(listId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(listId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'enabled', 'intervalMinutes', 'reverseMode',
+                           'lastTriggeredEpochMs', 'currentIndex', 'updatedAtEpochMs',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'enabled', 'intervalMinutes', 'reverseMode',
+                           'lastTriggeredEpochMs', 'currentIndex', 'updatedAtEpochMs',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCreateTimestamps(incoming()) &&
+                         isValidVocabList(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(listId) &&
+                         incoming().userId == existing().userId &&
+                         isValidUpdateTimestamps(incoming()) &&
+                         isValidVocabList(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'enabled', 'intervalMinutes', 'reverseMode',
+                           'lastTriggeredEpochMs', 'currentIndex', 'updatedAtEpochMs', 'updatedAt'
+                         ]);
+        allow delete: if isOwner(userId) && isValidId(listId);
+      }
+
+      match /vocab_words/{wordId} {
+        allow get: if isOwner(userId) && isValidId(wordId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(wordId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'listId', 'word', 'meaningBn', 'enabled', 'mastered',
+                           'weakCount', 'practiceCount', 'lastPracticedEpochMs', 'updatedAtEpochMs',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'listId', 'word', 'meaningBn', 'enabled', 'mastered',
+                           'weakCount', 'practiceCount', 'lastPracticedEpochMs', 'updatedAtEpochMs',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCreateTimestamps(incoming()) &&
+                         isValidVocabWord(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(wordId) &&
+                         incoming().userId == existing().userId &&
+                         isValidUpdateTimestamps(incoming()) &&
+                         isValidVocabWord(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'listId', 'word', 'meaningBn', 'enabled', 'mastered',
+                           'weakCount', 'practiceCount', 'lastPracticedEpochMs', 'updatedAtEpochMs', 'updatedAt'
+                         ]);
+        allow delete: if isOwner(userId) && isValidId(wordId);
+      }
+
+      match /weak_words/{weakId} {
+        allow get: if isOwner(userId) && isValidId(weakId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(weakId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'word', 'meaningBn', 'sourceType', 'mistakeCount',
+                           'lastMistakeEpochMs', 'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'word', 'meaningBn', 'sourceType', 'mistakeCount',
+                           'lastMistakeEpochMs', 'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCreateTimestamps(incoming()) &&
+                         isValidWeakWord(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(weakId) &&
+                         incoming().userId == existing().userId &&
+                         isValidUpdateTimestamps(incoming()) &&
+                         isValidWeakWord(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'word', 'meaningBn', 'sourceType', 'mistakeCount',
+                           'lastMistakeEpochMs', 'updatedAtEpochMs', 'updatedAt'
+                         ]);
+        allow delete: if isOwner(userId) && isValidId(weakId);
+      }
+
+      match /translations/{cacheId} {
+        allow get: if isOwner(userId) && isValidId(cacheId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(cacheId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'sourceText', 'sourceLang', 'targetLang', 'translatedText',
+                           'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'sourceText', 'sourceLang', 'targetLang', 'translatedText',
+                           'updatedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCreateTimestamps(incoming()) &&
+                         isValidTranslationCache(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(cacheId) &&
+                         incoming().userId == existing().userId &&
+                         isValidUpdateTimestamps(incoming()) &&
+                         isValidTranslationCache(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'sourceText', 'sourceLang', 'targetLang', 'translatedText',
+                           'updatedAtEpochMs', 'updatedAt'
+                         ]);
+        allow delete: if isOwner(userId) && isValidId(cacheId);
+      }
+    }
+  }
+}

@@ -1,0 +1,255 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User settings, study streak, and daily revision statistics stored at /users/{userId}.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the owner." },
+        "displayName": { "type": "string", "description": "Display name from Google account." },
+        "email": { "type": "string", "description": "Email address from Google account." },
+        "themeMode": { "type": "string", "enum": ["system", "light", "dark"] },
+        "soundEnabled": { "type": "boolean" },
+        "alarmVolume": { "type": "number" },
+        "vibrationEnabled": { "type": "boolean" },
+        "defaultSnoozeMinutes": { "type": "integer" },
+        "vocabOrderMode": { "type": "string", "enum": ["ordered", "random"] },
+        "streakCount": { "type": "integer" },
+        "lastActiveDay": { "type": "string" },
+        "todayRevisionCount": { "type": "integer" },
+        "todayDate": { "type": "string" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()." }
+      },
+      "required": [
+        "userId", "displayName", "email", "themeMode", "soundEnabled",
+        "alarmVolume", "vibrationEnabled", "defaultSnoozeMinutes", "vocabOrderMode",
+        "streakCount", "lastActiveDay", "todayRevisionCount", "todayDate",
+        "updatedAtEpochMs", "createdAt", "updatedAt"
+      ]
+    },
+    "Book": {
+      "title": "Book",
+      "description": "One of the 11 fixed subject books with custom color, schedule, and optional exam date.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "colorHex": { "type": "string" },
+        "iconKey": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "enabled": { "type": "boolean" },
+        "intervalMinutes": { "type": "integer" },
+        "useActiveHours": { "type": "boolean" },
+        "activeStartMinutes": { "type": "integer" },
+        "activeEndMinutes": { "type": "integer" },
+        "examDateEpochMs": { "type": "integer" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "title", "colorHex", "iconKey", "sortOrder", "enabled",
+        "intervalMinutes", "useActiveHours", "activeStartMinutes", "activeEndMinutes",
+        "examDateEpochMs", "updatedAtEpochMs", "createdAt", "updatedAt"
+      ]
+    },
+    "Chapter": {
+      "title": "Chapter",
+      "description": "Chapter belonging to a book with optional schedule overrides.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "bookId": { "type": "string" },
+        "title": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "overrideEnabled": { "type": "integer" },
+        "overrideIntervalMinutes": { "type": "integer" },
+        "useActiveHours": { "type": "integer" },
+        "activeStartMinutes": { "type": "integer" },
+        "activeEndMinutes": { "type": "integer" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "bookId", "title", "sortOrder", "overrideEnabled",
+        "overrideIntervalMinutes", "useActiveHours", "activeStartMinutes",
+        "activeEndMinutes", "updatedAtEpochMs", "createdAt", "updatedAt"
+      ]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Revision note belonging to a chapter and book.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "bookId": { "type": "string" },
+        "chapterId": { "type": "string" },
+        "content": { "type": "string" },
+        "starred": { "type": "boolean" },
+        "overrideEnabled": { "type": "integer" },
+        "overrideIntervalMinutes": { "type": "integer" },
+        "revisionCount": { "type": "integer" },
+        "lastRevisedEpochMs": { "type": "integer" },
+        "lastRevisedDay": { "type": "string" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "bookId", "chapterId", "content", "starred", "overrideEnabled",
+        "overrideIntervalMinutes", "revisionCount", "lastRevisedEpochMs",
+        "lastRevisedDay", "updatedAtEpochMs", "createdAt", "updatedAt"
+      ]
+    },
+    "ParagraphFile": {
+      "title": "ParagraphFile",
+      "description": "English paragraph practice file split into sequential lines.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "rawText": { "type": "string" },
+        "lines": { "type": "array" },
+        "currentLineIndex": { "type": "integer" },
+        "enabled": { "type": "boolean" },
+        "intervalMinutes": { "type": "integer" },
+        "memoryMode": { "type": "boolean" },
+        "lastTriggeredEpochMs": { "type": "integer" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "title", "rawText", "lines", "currentLineIndex", "enabled",
+        "intervalMinutes", "memoryMode", "lastTriggeredEpochMs",
+        "updatedAtEpochMs", "createdAt", "updatedAt"
+      ]
+    },
+    "VocabList": {
+      "title": "VocabList",
+      "description": "English vocabulary list with interval and reverse mode settings.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "intervalMinutes": { "type": "integer" },
+        "reverseMode": { "type": "boolean" },
+        "lastTriggeredEpochMs": { "type": "integer" },
+        "currentIndex": { "type": "integer" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "title", "enabled", "intervalMinutes", "reverseMode",
+        "lastTriggeredEpochMs", "currentIndex", "updatedAtEpochMs",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "VocabWord": {
+      "title": "VocabWord",
+      "description": "Single English vocabulary word belonging to a vocabulary list.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "listId": { "type": "string" },
+        "word": { "type": "string" },
+        "meaningBn": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "mastered": { "type": "boolean" },
+        "weakCount": { "type": "integer" },
+        "practiceCount": { "type": "integer" },
+        "lastPracticedEpochMs": { "type": "integer" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "listId", "word", "meaningBn", "enabled", "mastered",
+        "weakCount", "practiceCount", "lastPracticedEpochMs", "updatedAtEpochMs",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "WeakWord": {
+      "title": "WeakWord",
+      "description": "Wrongly typed or misspelled English word tracked for focused revision.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "word": { "type": "string" },
+        "meaningBn": { "type": "string" },
+        "sourceType": { "type": "string", "enum": ["paragraph", "vocab"] },
+        "mistakeCount": { "type": "integer" },
+        "lastMistakeEpochMs": { "type": "integer" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "word", "meaningBn", "sourceType", "mistakeCount",
+        "lastMistakeEpochMs", "updatedAtEpochMs", "createdAt", "updatedAt"
+      ]
+    },
+    "TranslationCache": {
+      "title": "TranslationCache",
+      "description": "Cached single-item English-to-Bengali translation.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "sourceText": { "type": "string" },
+        "sourceLang": { "type": "string" },
+        "targetLang": { "type": "string" },
+        "translatedText": { "type": "string" },
+        "updatedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "sourceText", "sourceLang", "targetLang", "translatedText",
+        "updatedAtEpochMs", "createdAt", "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-only user settings, streak, and daily stats."
+    },
+    "/users/{userId}/books/{bookId}": {
+      "schema": { "$ref": "#/entities/Book" },
+      "description": "Owner-only subject books."
+    },
+    "/users/{userId}/chapters/{chapterId}": {
+      "schema": { "$ref": "#/entities/Chapter" },
+      "description": "Owner-only chapters within books."
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/Note" },
+      "description": "Owner-only revision notes."
+    },
+    "/users/{userId}/paragraphs/{paragraphId}": {
+      "schema": { "$ref": "#/entities/ParagraphFile" },
+      "description": "Owner-only English paragraph practice files."
+    },
+    "/users/{userId}/vocab_lists/{listId}": {
+      "schema": { "$ref": "#/entities/VocabList" },
+      "description": "Owner-only English vocabulary lists."
+    },
+    "/users/{userId}/vocab_words/{wordId}": {
+      "schema": { "$ref": "#/entities/VocabWord" },
+      "description": "Owner-only English vocabulary words."
+    },
+    "/users/{userId}/weak_words/{weakId}": {
+      "schema": { "$ref": "#/entities/WeakWord" },
+      "description": "Owner-only weak words recorded during practice."
+    },
+    "/users/{userId}/translations/{cacheId}": {
+      "schema": { "$ref": "#/entities/TranslationCache" },
+      "description": "Owner-only cached single-item English-to-Bengali translations."
+    }
+  }
+}
