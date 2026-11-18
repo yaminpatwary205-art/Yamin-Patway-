@@ -205,16 +205,34 @@ fun ChapterDetailScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val isNotePaused = note.overrideEnabled == 0
                                     val statusText = buildString {
                                         append("রিভিশন: ${note.revisionCount}")
-                                        if (note.overrideEnabled == 0) append(" • বিরতিতে")
-                                        else if (note.overrideIntervalMinutes > 0) append(" • ${note.overrideIntervalMinutes} মি.")
+                                        if (isNotePaused) append(" • এখন আসবে না")
+                                        else if (note.overrideEnabled == 1) append(" • অ্যালার্ম চালু")
+                                        if (note.overrideIntervalMinutes > 0) append(" (${note.overrideIntervalMinutes} মি.)")
                                     }
-                                    Text(
-                                        text = statusText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    TextButton(
+                                        onClick = {
+                                            val nextOverride = if (isNotePaused) 1 else 0
+                                            scope.launch { repository.updateNote(note.copy(overrideEnabled = nextOverride)) }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(34.dp).testTag("note_toggle_alarm_${note.id}")
+                                    ) {
+                                        Icon(
+                                            if (isNotePaused) Icons.Rounded.NotificationsOff else Icons.Rounded.NotificationsActive,
+                                            contentDescription = "অ্যালার্ম চালু/বন্ধ",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (isNotePaused) MaterialTheme.colorScheme.onSurfaceVariant else displayAccent
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = statusText,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isNotePaused) MaterialTheme.colorScheme.onSurfaceVariant else displayAccent
+                                        )
+                                    }
 
                                     Row {
                                         IconButton(onClick = { scheduleNote = note }) {

@@ -292,6 +292,91 @@ class RevisionUiCujTest {
         }
     }
 
+    @Test
+    fun `alarms tab renders multiple alarms and allows opening alarm creator dialog`() {
+        val para = ParagraphFileEntity("p1", "Climate Change", "Line 1. Line 2.", listOf("Line 1.", "Line 2."))
+        val alarm1 = RevisionAlarmEntity("a1", "মর্নিং অ্যালার্ম", scheduleType = "interval", intervalMinutes = 15, selectedParagraphIds = listOf("p1"))
+        val alarm2 = RevisionAlarmEntity("a2", "ইভনিং অ্যালার্ম", scheduleType = "clock", hourOfDay = 20, minute = 30, selectedBookIds = listOf("book_01"))
+
+        runBlocking {
+            dao.upsertParagraph(para)
+            dao.upsertAlarms(listOf(alarm1, alarm2))
+        }
+
+        composeRule.setContent {
+            val state by viewModel.uiState.collectAsState()
+            RevisionAlarmTheme {
+                HomeScreen(
+                    state = state,
+                    viewModel = viewModel,
+                    onOpenBook = {},
+                    onOpenChapter = { _, _ -> },
+                    onOpenVocabList = {},
+                    onOpenSettings = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("tab_section_3").performScrollTo().performClick()
+        composeRule.waitUntil(timeoutMillis = 5000) {
+            composeRule.onAllNodesWithText("মর্নিং অ্যালার্ম").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("মর্নিং অ্যালার্ম").assertIsDisplayed()
+        composeRule.onNodeWithTag("alarms_list").performScrollToNode(hasText("ইভনিং অ্যালার্ম"))
+        composeRule.onNodeWithText("ইভনিং অ্যালার্ম").assertIsDisplayed()
+
+        // Open Alarm Creator dialog and verify granular selection tabs render
+        composeRule.onNodeWithTag("add_alarm_fab").performClick()
+        composeRule.onNodeWithTag("alarm_title_input").performTextInput("নতুন রুটিন")
+        composeRule.onNodeWithTag("alarm_editor_list").performScrollToNode(hasTestTag("alarm_picker_tab_1"))
+        composeRule.onNodeWithTag("alarm_picker_tab_1").performClick()
+        composeRule.onNodeWithTag("alarm_editor_list").performScrollToNode(hasTestTag("alarm_select_para_p1"))
+        composeRule.onNodeWithTag("alarm_select_para_p1").performClick()
+        composeRule.onNodeWithTag("save_alarm_button").performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5000) {
+            composeRule.onAllNodesWithText("অ্যালার্ম (3)").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("alarms_list").performScrollToNode(hasText("নতুন রুটিন"))
+        composeRule.onNodeWithText("নতুন রুটিন").assertIsDisplayed()
+    }
+
+    @Test
+    fun `paragraph popup displays loop label on final line`() {
+        val para = ParagraphFileEntity(
+            id = "p_last",
+            title = "Tree Plantation",
+            rawText = "Trees help us. Save trees.",
+            lines = listOf("Trees help us.", "Save trees."),
+            currentLineIndex = 1
+        )
+        runBlocking {
+            dao.upsertParagraph(para)
+            repo.saveManualSingleTranslation("Save trees.", "গাছ বাঁচান।")
+        }
+
+        composeRule.setContent {
+            val state by viewModel.uiState.collectAsState()
+            RevisionAlarmTheme {
+                state.activePopup?.let { popup ->
+                    RevisionPopupOverlay(
+                        popup = popup,
+                        defaultSnoozeMinutes = 5,
+                        viewModel = viewModel,
+                        onToggleNoteStar = {}
+                    )
+                }
+            }
+        }
+
+        composeRule.runOnUiThread { viewModel.launchParagraphNow(para) }
+        composeRule.waitUntil(timeoutMillis = 5000) {
+            composeRule.onAllNodesWithTag("paragraph_next_done_button").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("শেষ লাইন (2/2)").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("সম্পন্ন • আবার ১ম লাইন").performScrollTo().assertIsDisplayed()
+    }
+
     private fun contrastRatio(fg: androidx.compose.ui.graphics.Color, bg: androidx.compose.ui.graphics.Color): Double {
         fun lum(c: androidx.compose.ui.graphics.Color): Double {
             fun ch(v: Float): Double {

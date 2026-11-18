@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.alarm.AlarmAudioManager
+import com.example.alarm.AlarmContentItem
 import com.example.alarm.AlarmScheduler
 import com.example.alarm.ScheduledTrigger
 import com.example.data.ParagraphCheckResult
@@ -11,15 +12,22 @@ import com.example.data.RevisionRepository
 import com.example.data.local.*
 import com.example.data.remote.SyncStatus
 import com.example.translation.TranslationOutcome
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed interface ActivePopup {
+    val alarmId: String?
+    val alarmTitle: String?
+
     data class NotePopup(
         val book: BookEntity,
         val chapter: ChapterEntity,
-        val note: NoteEntity
+        val note: NoteEntity,
+        override val alarmId: String? = null,
+        override val alarmTitle: String? = null
     ) : ActivePopup
 
     data class ParagraphPopup(
@@ -27,13 +35,17 @@ sealed interface ActivePopup {
         val lineIndex: Int,
         val lineText: String,
         val translationState: PopupTranslationState = PopupTranslationState.Loading,
-        val checkResult: ParagraphCheckResult? = null
+        val checkResult: ParagraphCheckResult? = null,
+        override val alarmId: String? = null,
+        override val alarmTitle: String? = null
     ) : ActivePopup
 
     data class VocabPopup(
         val list: VocabListEntity,
         val word: VocabWordEntity,
-        val translationState: PopupTranslationState = PopupTranslationState.Loading
+        val translationState: PopupTranslationState = PopupTranslationState.Loading,
+        override val alarmId: String? = null,
+        override val alarmTitle: String? = null
     ) : ActivePopup
 }
 
@@ -52,6 +64,7 @@ data class RevisionUiState(
     val vocabLists: List<VocabListEntity> = emptyList(),
     val vocabWords: List<VocabWordEntity> = emptyList(),
     val weakWords: List<WeakWordEntity> = emptyList(),
+    val alarms: List<RevisionAlarmEntity> = emptyList(),
     val stats: UserStatsEntity = UserStatsEntity(),
     val syncStatus: SyncStatus = SyncStatus.LOCAL_ONLY,
     val nextTrigger: ScheduledTrigger? = null,
@@ -74,6 +87,12 @@ class RevisionViewModel(
     private val _bannerMessage = MutableStateFlow<String?>(null)
     private val _nowTicker = MutableStateFlow(System.currentTimeMillis())
 
+    @Volatile
+    private var triggerLaunchInFlight = false
+
+    @Volatile
+    private var suppressAutoTriggerUntilMs = 0L
+
     private val baseDataFlow = combine(
         repository.booksFlow,
         repository.chaptersFlow,
@@ -88,19 +107,26 @@ class RevisionViewModel(
         repository.vocabWordsFlow,
         repository.weakWordsFlow,
         repository.statsFlow,
-        _syncStatus,
         _nowTicker
-    ) { vocabWords, weakWords, stats, syncStatus, nowMs ->
-        SecondaryDataSlice(vocabWords, weakWords, stats, syncStatus, nowMs)
+    ) { vocabWords, weakWords, stats, nowMs ->
+        SecondaryDataSlice(vocabWords, weakWords, stats, nowMs)
+    }
+
+    private val metaDataFlow = combine(
+        repository.alarmsFlow,
+        _syncStatus,
+        _activePopup,
+        _showCelebration,
+        _bannerMessage
+    ) { alarms, syncStatus, popup, celebration, banner ->
+        MetaDataSlice(alarms, syncStatus, popup, celebration, banner)
     }
 
     val uiState: StateFlow<RevisionUiState> = combine(
         baseDataFlow,
         secondaryDataFlow,
-        _activePopup,
-        _showCelebration,
-        _bannerMessage
-    ) { base, sec, popup, celebration, banner ->
+        metaDataFlow
+    ) { base, sec, meta ->
         val next = AlarmScheduler.computeNextTrigger(
             nowMs = sec.nowMs,
             stats = sec.stats,
@@ -109,7 +135,8 @@ class RevisionViewModel(
             notes = base.notes,
             paragraphs = base.paragraphs,
             vocabLists = base.vocabLists,
-            vocabWords = sec.vocabWords
+            vocabWords = sec.vocabWords,
+            alarms = meta.alarms
         )
         val countdown = if (next != null) {
             ((next.nextTriggerEpochMs - sec.nowMs) / 1000L).coerceAtLeast(0L)
@@ -124,13 +151,14 @@ class RevisionViewModel(
             vocabLists = base.vocabLists,
             vocabWords = sec.vocabWords,
             weakWords = sec.weakWords,
+            alarms = meta.alarms,
             stats = sec.stats,
-            syncStatus = sec.syncStatus,
+            syncStatus = meta.syncStatus,
             nextTrigger = next,
             countdownSeconds = countdown,
-            activePopup = popup,
-            showCelebration = celebration,
-            bannerMessage = banner
+            activePopup = meta.popup,
+            showCelebration = meta.celebration,
+            bannerMessage = meta.banner
         )
     }.stateIn(
         scope = viewModelScope,
@@ -143,17 +171,23 @@ class RevisionViewModel(
             repository.ensureSeeded()
             repository.rescheduleAlarms()
         }
-        // Timestamp-based scheduler tick: fires missed/overdue timers immediately when app is open
         viewModelScope.launch {
             while (true) {
                 delay(1000L)
                 val now = System.currentTimeMillis()
                 _nowTicker.value = now
-                if (_activePopup.value == null) {
+                if (_activePopup.value == null && !triggerLaunchInFlight && now >= suppressAutoTriggerUntilMs) {
                     val state = uiState.value
                     val next = state.nextTrigger
                     if (next != null && next.nextTriggerEpochMs <= now && state.stats.snoozedUntilEpochMs <= now) {
-                        openTriggerPopup(next)
+                        val alarmSnoozeMs = if (next is ScheduledTrigger.CustomAlarmScope) {
+                            state.alarms.find { it.id == next.alarmId }?.snoozedUntilEpochMs ?: 0L
+                        } else {
+                            0L
+                        }
+                        if (alarmSnoozeMs <= now) {
+                            openTriggerPopup(next)
+                        }
                     }
                 }
             }
@@ -189,20 +223,22 @@ class RevisionViewModel(
         }
     }
 
-    fun handleIncomingNotificationTrigger(type: String?, targetId: String?) {
+    fun handleIncomingNotificationTrigger(type: String?, targetId: String?, alarmId: String? = null) {
         AlarmScheduler.cancelRepeatReminder(context)
         if (type == null || targetId.isNullOrBlank()) {
             triggerNextAvailableNow()
             return
         }
         viewModelScope.launch {
+            val cleanAlarmId = alarmId?.takeIf { it.isNotBlank() }
+            val alarmTitle = cleanAlarmId?.let { repository.dao.getAlarmById(it)?.title }
             when (type) {
                 "note" -> {
                     val note = repository.dao.getNoteById(targetId)
                     val book = note?.let { repository.dao.getBookById(it.bookId) }
                     val chapter = note?.let { repository.dao.getChapterById(it.chapterId) }
                     if (note != null && book != null && chapter != null) {
-                        showNotePopup(book, chapter, note)
+                        showNotePopup(book, chapter, note, cleanAlarmId, alarmTitle)
                     } else {
                         triggerNextAvailableNow()
                     }
@@ -210,7 +246,7 @@ class RevisionViewModel(
                 "paragraph" -> {
                     val para = repository.dao.getParagraphById(targetId)
                     if (para != null && para.lines.isNotEmpty()) {
-                        showParagraphPopup(para)
+                        showParagraphPopup(para, cleanAlarmId, alarmTitle)
                     } else {
                         triggerNextAvailableNow()
                     }
@@ -218,7 +254,7 @@ class RevisionViewModel(
                 "vocab" -> {
                     val list = repository.dao.getVocabListById(targetId)
                     if (list != null) {
-                        showVocabPopup(list)
+                        showVocabPopup(list, alarmId = cleanAlarmId, alarmTitle = alarmTitle)
                     } else {
                         triggerNextAvailableNow()
                     }
@@ -238,12 +274,38 @@ class RevisionViewModel(
             notes = state.notes,
             paragraphs = state.paragraphs,
             vocabLists = state.vocabLists,
-            vocabWords = state.vocabWords
+            vocabWords = state.vocabWords,
+            alarms = state.alarms
         )
         if (next != null) {
             openTriggerPopup(next)
         } else {
-            _bannerMessage.value = "সক্রিয় কোনো নোট, প্যারাগ্রাফ বা ভোকাবুলারি নেই। প্রথমে অন্তত একটি যুক্ত করুন।"
+            _bannerMessage.value = "সক্রিয় কোনো অ্যালার্ম, নোট, প্যারাগ্রাফ বা ভোকাবুলারি নেই। প্রথমে অন্তত একটি যুক্ত করুন।"
+        }
+    }
+
+    fun launchCustomAlarmNow(alarm: RevisionAlarmEntity) {
+        val state = uiState.value
+        val items = AlarmScheduler.resolveAlarmItems(
+            alarm = alarm,
+            books = state.books,
+            chapters = state.chapters,
+            notes = state.notes,
+            paragraphs = state.paragraphs,
+            vocabLists = state.vocabLists,
+            vocabWords = state.vocabWords
+        )
+        if (items.isEmpty()) {
+            _bannerMessage.value = "'${alarm.title}' অ্যালার্মে কোনো সক্রিয় বিষয় নির্বাচিত নেই।"
+            return
+        }
+        val picked = items[alarm.rotationCursor.coerceAtLeast(0) % items.size]
+        viewModelScope.launch {
+            when (picked) {
+                is AlarmContentItem.NoteItem -> showNotePopup(picked.book, picked.chapter, picked.note, alarm.id, alarm.title)
+                is AlarmContentItem.ParagraphItem -> showParagraphPopup(picked.paragraph, alarm.id, alarm.title)
+                is AlarmContentItem.VocabItem -> showVocabPopup(picked.list, alarmId = alarm.id, alarmTitle = alarm.title)
+            }
         }
     }
 
@@ -259,34 +321,70 @@ class RevisionViewModel(
     }
 
     private fun openTriggerPopup(trigger: ScheduledTrigger) {
+        if (triggerLaunchInFlight) return
+        triggerLaunchInFlight = true
         viewModelScope.launch {
-            when (trigger) {
-                is ScheduledTrigger.NoteScope -> {
-                    val note = repository.dao.getNoteById(trigger.noteId) ?: return@launch
-                    val book = repository.dao.getBookById(trigger.bookId) ?: return@launch
-                    val chapter = repository.dao.getChapterById(trigger.chapterId) ?: return@launch
-                    showNotePopup(book, chapter, note)
+            try {
+                when (trigger) {
+                    is ScheduledTrigger.CustomAlarmScope -> {
+                        val alarm = repository.dao.getAlarmById(trigger.alarmId)
+                        val title = alarm?.title
+                        when (trigger.resolvedType) {
+                            "note" -> {
+                                val note = repository.dao.getNoteById(trigger.resolvedTargetId) ?: return@launch
+                                val book = repository.dao.getBookById(note.bookId) ?: return@launch
+                                val chapter = repository.dao.getChapterById(note.chapterId) ?: return@launch
+                                showNotePopup(book, chapter, note, trigger.alarmId, title)
+                            }
+                            "paragraph" -> {
+                                val para = repository.dao.getParagraphById(trigger.resolvedTargetId) ?: return@launch
+                                showParagraphPopup(para, trigger.alarmId, title)
+                            }
+                            "vocab" -> {
+                                val list = repository.dao.getVocabListById(trigger.resolvedTargetId) ?: return@launch
+                                showVocabPopup(list, alarmId = trigger.alarmId, alarmTitle = title)
+                            }
+                        }
+                    }
+                    is ScheduledTrigger.NoteScope -> {
+                        val note = repository.dao.getNoteById(trigger.noteId) ?: return@launch
+                        val book = repository.dao.getBookById(trigger.bookId) ?: return@launch
+                        val chapter = repository.dao.getChapterById(trigger.chapterId) ?: return@launch
+                        showNotePopup(book, chapter, note)
+                    }
+                    is ScheduledTrigger.ParagraphScope -> {
+                        val para = repository.dao.getParagraphById(trigger.paragraphId) ?: return@launch
+                        showParagraphPopup(para)
+                    }
+                    is ScheduledTrigger.VocabScope -> {
+                        val list = repository.dao.getVocabListById(trigger.listId) ?: return@launch
+                        showVocabPopup(list)
+                    }
                 }
-                is ScheduledTrigger.ParagraphScope -> {
-                    val para = repository.dao.getParagraphById(trigger.paragraphId) ?: return@launch
-                    showParagraphPopup(para)
-                }
-                is ScheduledTrigger.VocabScope -> {
-                    val list = repository.dao.getVocabListById(trigger.listId) ?: return@launch
-                    showVocabPopup(list)
-                }
+            } finally {
+                triggerLaunchInFlight = false
             }
         }
     }
 
-    private fun showNotePopup(book: BookEntity, chapter: ChapterEntity, note: NoteEntity) {
+    private fun showNotePopup(
+        book: BookEntity,
+        chapter: ChapterEntity,
+        note: NoteEntity,
+        alarmId: String? = null,
+        alarmTitle: String? = null
+    ) {
         AlarmScheduler.cancelRepeatReminder(context)
         val stats = uiState.value.stats
         audioManager.startAlarmFeedback(stats.soundEnabled, stats.alarmVolume, stats.vibrationEnabled)
-        _activePopup.value = ActivePopup.NotePopup(book, chapter, note)
+        _activePopup.value = ActivePopup.NotePopup(book, chapter, note, alarmId, alarmTitle)
     }
 
-    private fun showParagraphPopup(para: ParagraphFileEntity) {
+    private fun showParagraphPopup(
+        para: ParagraphFileEntity,
+        alarmId: String? = null,
+        alarmTitle: String? = null
+    ) {
         AlarmScheduler.cancelRepeatReminder(context)
         val stats = uiState.value.stats
         audioManager.startAlarmFeedback(stats.soundEnabled, stats.alarmVolume, stats.vibrationEnabled)
@@ -296,7 +394,9 @@ class RevisionViewModel(
             paragraph = para,
             lineIndex = idx,
             lineText = line,
-            translationState = PopupTranslationState.Loading
+            translationState = PopupTranslationState.Loading,
+            alarmId = alarmId,
+            alarmTitle = alarmTitle
         )
         translateCurrentParagraphLine(line)
     }
@@ -359,15 +459,28 @@ class RevisionViewModel(
 
     fun completeParagraphLineAndClose() {
         val current = _activePopup.value as? ActivePopup.ParagraphPopup ?: return
+        suppressAutoTriggerUntilMs = System.currentTimeMillis() + 3_000L
         audioManager.stopAlarmFeedback()
         _activePopup.value = null
         viewModelScope.launch {
-            repository.advanceParagraphLine(current.paragraph.id)
-            triggerCelebration()
+            try {
+                withContext(NonCancellable) {
+                    repository.advanceParagraphLine(current.paragraph.id)
+                    current.alarmId?.let { repository.markAlarmTriggered(it, advanceCursor = true) }
+                }
+                triggerCelebration()
+            } finally {
+                suppressAutoTriggerUntilMs = 0L
+            }
         }
     }
 
-    private suspend fun showVocabPopup(list: VocabListEntity, excludeWordId: String? = null) {
+    private suspend fun showVocabPopup(
+        list: VocabListEntity,
+        excludeWordId: String? = null,
+        alarmId: String? = null,
+        alarmTitle: String? = null
+    ) {
         AlarmScheduler.cancelRepeatReminder(context)
         val activeWords = repository.dao.getAllVocabWordsOnce()
             .filter { it.listId == list.id && it.enabled }
@@ -381,7 +494,6 @@ class RevisionViewModel(
             activeWords
         }
         val stats = uiState.value.stats
-        // Prefer weak and least-practiced words; order or random according to setting
         val picked = if (stats.vocabOrderMode == "random") {
             val maxWeak = pool.maxOf { it.weakCount }
             val prioritized = pool.filter { it.weakCount == maxWeak || !it.mastered }
@@ -401,7 +513,7 @@ class RevisionViewModel(
         } else {
             PopupTranslationState.Loading
         }
-        _activePopup.value = ActivePopup.VocabPopup(list, picked, initialTrans)
+        _activePopup.value = ActivePopup.VocabPopup(list, picked, initialTrans, alarmId, alarmTitle)
 
         if (picked.meaningBn.isBlank()) {
             translateCurrentVocabWord(picked)
@@ -461,57 +573,95 @@ class RevisionViewModel(
     fun nextVocabWordInPopup() {
         val current = _activePopup.value as? ActivePopup.VocabPopup ?: return
         viewModelScope.launch {
-            showVocabPopup(current.list, excludeWordId = current.word.id)
+            showVocabPopup(
+                list = current.list,
+                excludeWordId = current.word.id,
+                alarmId = current.alarmId,
+                alarmTitle = current.alarmTitle
+            )
         }
     }
 
     fun markNoteDoneAndClose() {
         val current = _activePopup.value as? ActivePopup.NotePopup ?: return
+        suppressAutoTriggerUntilMs = System.currentTimeMillis() + 3_000L
         audioManager.stopAlarmFeedback()
         _activePopup.value = null
         viewModelScope.launch {
-            repository.markNoteRevised(current.note.id)
-            triggerCelebration()
+            try {
+                withContext(NonCancellable) {
+                    repository.markNoteRevised(current.note.id)
+                    current.alarmId?.let { repository.markAlarmTriggered(it, advanceCursor = true) }
+                }
+                triggerCelebration()
+            } finally {
+                suppressAutoTriggerUntilMs = 0L
+            }
         }
     }
 
     fun snoozePopup(minutes: Int) {
+        val current = _activePopup.value
+        suppressAutoTriggerUntilMs = System.currentTimeMillis() + 3_000L
         audioManager.stopAlarmFeedback()
         _activePopup.value = null
         viewModelScope.launch {
-            repository.snoozeAll(minutes)
-            _bannerMessage.value = "$minutes মিনিটের জন্য স্নুজ করা হয়েছে।"
+            try {
+                withContext(NonCancellable) {
+                    val customAlarmId = current?.alarmId
+                    if (customAlarmId != null) {
+                        repository.snoozeSingleAlarm(customAlarmId, minutes)
+                    } else {
+                        repository.snoozeAll(minutes)
+                    }
+                }
+                _bannerMessage.value = "$minutes মিনিটের জন্য স্নুজ করা হয়েছে।"
+            } finally {
+                suppressAutoTriggerUntilMs = 0L
+            }
         }
     }
 
     fun stopPopupAlarm() {
         val current = _activePopup.value
+        suppressAutoTriggerUntilMs = System.currentTimeMillis() + 3_000L
         audioManager.stopAlarmFeedback()
         _activePopup.value = null
         viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            repository.updateStats { it.copy(snoozedUntilEpochMs = 0L) }
-            when (current) {
-                is ActivePopup.NotePopup -> {
-                    val noteHasOverride = current.note.overrideEnabled != -1 || current.note.overrideIntervalMinutes > 0
-                    val chapHasOverride = current.chapter.overrideEnabled != -1 || current.chapter.overrideIntervalMinutes > 0
-                    repository.updateNote(current.note.copy(lastTriggeredEpochMs = now))
-                    if (!noteHasOverride) {
-                        repository.updateChapter(current.chapter.copy(lastTriggeredEpochMs = now))
+            try {
+                withContext(NonCancellable) {
+                    val now = System.currentTimeMillis()
+                    val customAlarmId = current?.alarmId
+                    if (customAlarmId != null) {
+                        repository.markAlarmTriggered(customAlarmId, advanceCursor = true)
+                    } else {
+                        repository.updateStats { it.copy(snoozedUntilEpochMs = 0L) }
+                        when (current) {
+                            is ActivePopup.NotePopup -> {
+                                val noteHasOverride = current.note.overrideEnabled != -1 || current.note.overrideIntervalMinutes > 0
+                                val chapHasOverride = current.chapter.overrideEnabled != -1 || current.chapter.overrideIntervalMinutes > 0
+                                repository.updateNote(current.note.copy(lastTriggeredEpochMs = now))
+                                if (!noteHasOverride) {
+                                    repository.updateChapter(current.chapter.copy(lastTriggeredEpochMs = now))
+                                }
+                                if (!noteHasOverride && !chapHasOverride) {
+                                    repository.updateBook(current.book.copy(lastTriggeredEpochMs = now))
+                                }
+                            }
+                            is ActivePopup.ParagraphPopup -> {
+                                repository.updateParagraph(current.paragraph.copy(lastTriggeredEpochMs = now))
+                            }
+                            is ActivePopup.VocabPopup -> {
+                                repository.updateVocabList(current.list.copy(lastTriggeredEpochMs = now))
+                            }
+                            null -> Unit
+                        }
+                        repository.rescheduleAlarms()
                     }
-                    if (!noteHasOverride && !chapHasOverride) {
-                        repository.updateBook(current.book.copy(lastTriggeredEpochMs = now))
-                    }
                 }
-                is ActivePopup.ParagraphPopup -> {
-                    repository.updateParagraph(current.paragraph.copy(lastTriggeredEpochMs = now))
-                }
-                is ActivePopup.VocabPopup -> {
-                    repository.updateVocabList(current.list.copy(lastTriggeredEpochMs = now))
-                }
-                null -> Unit
+            } finally {
+                suppressAutoTriggerUntilMs = 0L
             }
-            repository.rescheduleAlarms()
         }
     }
 
@@ -536,7 +686,14 @@ class RevisionViewModel(
         val vocabWords: List<VocabWordEntity>,
         val weakWords: List<WeakWordEntity>,
         val stats: UserStatsEntity,
-        val syncStatus: SyncStatus,
         val nowMs: Long
+    )
+
+    private data class MetaDataSlice(
+        val alarms: List<RevisionAlarmEntity>,
+        val syncStatus: SyncStatus,
+        val popup: ActivePopup?,
+        val celebration: Boolean,
+        val banner: String?
     )
 }

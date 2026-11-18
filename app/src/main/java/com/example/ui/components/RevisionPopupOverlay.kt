@@ -97,7 +97,7 @@ fun RevisionPopupOverlay(
                     }
                     Column {
                         Text(
-                            text = "রিভিশন অ্যালার্ম",
+                            text = popup.alarmTitle?.takeIf { it.isNotBlank() } ?: "রিভিশন অ্যালার্ম",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -210,8 +210,8 @@ private fun NotePopupContent(
 
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
-                contentColor = MaterialTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
@@ -288,11 +288,12 @@ private fun ParagraphPopupContent(
 ) {
     var typedText by remember(popup.paragraph.id, popup.lineIndex) { mutableStateOf("") }
     var manualMeaningInput by remember(popup.paragraph.id, popup.lineIndex) { mutableStateOf("") }
-    var memorySecondsLeft by remember(popup.paragraph.id, popup.lineIndex, popup.paragraph.memoryMode) {
+    var retryCounter by remember(popup.paragraph.id, popup.lineIndex) { mutableIntStateOf(0) }
+    var memorySecondsLeft by remember(popup.paragraph.id, popup.lineIndex, popup.paragraph.memoryMode, retryCounter) {
         mutableStateOf(if (popup.paragraph.memoryMode) 5 else -1)
     }
 
-    LaunchedEffect(popup.paragraph.id, popup.lineIndex, popup.paragraph.memoryMode) {
+    LaunchedEffect(popup.paragraph.id, popup.lineIndex, popup.paragraph.memoryMode, retryCounter) {
         if (popup.paragraph.memoryMode) {
             memorySecondsLeft = 5
             while (memorySecondsLeft > 0) {
@@ -303,6 +304,7 @@ private fun ParagraphPopupContent(
     }
 
     val hideEnglishLine = popup.paragraph.memoryMode && memorySecondsLeft == 0 && popup.checkResult == null
+    val isLastLine = popup.lineIndex >= popup.paragraph.lines.lastIndex
 
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
@@ -326,7 +328,8 @@ private fun ParagraphPopupContent(
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ) {
                     Text(
-                        text = "লাইন ${popup.lineIndex + 1} / ${popup.paragraph.lines.size}",
+                        text = if (isLastLine) "শেষ লাইন (${popup.lineIndex + 1}/${popup.paragraph.lines.size})"
+                        else "লাইন ${popup.lineIndex + 1} / ${popup.paragraph.lines.size}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -344,7 +347,7 @@ private fun ParagraphPopupContent(
 
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -395,7 +398,7 @@ private fun ParagraphPopupContent(
                 val failColor = adaptiveAccent(Color(0xFFDC2626))
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -442,6 +445,7 @@ private fun ParagraphPopupContent(
             OutlinedButton(
                 onClick = {
                     typedText = ""
+                    retryCounter++
                     viewModel.resetParagraphRetry()
                 },
                 modifier = Modifier.weight(1f).height(48.dp),
@@ -451,14 +455,18 @@ private fun ParagraphPopupContent(
             }
             Button(
                 onClick = { viewModel.completeParagraphLineAndClose() },
-                modifier = Modifier.weight(1f).height(48.dp),
+                modifier = Modifier.weight(1f).height(48.dp).testTag("paragraph_next_done_button"),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF059669),
                     contentColor = Color.White
                 )
             ) {
-                Text("পরে পরেরটি", color = Color.White)
+                Text(
+                    if (isLastLine) "সম্পন্ন • আবার ১ম লাইন" else "পড়া হয়েছে • পরের লাইন",
+                    color = Color.White,
+                    maxLines = 1
+                )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -538,7 +546,7 @@ private fun VocabPopupContent(
             if (!popup.list.reverseMode || checkedCorrect != null) {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -695,11 +703,11 @@ private fun TranslationBox(
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f),
+        color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (translationState) {

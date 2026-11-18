@@ -25,6 +25,7 @@ class AlarmReceiver : BroadcastReceiver() {
         val type = intent.getStringExtra(AlarmScheduler.EXTRA_TRIGGER_TYPE) ?: "note"
         val targetId = intent.getStringExtra(AlarmScheduler.EXTRA_TRIGGER_TARGET_ID) ?: ""
         val label = intent.getStringExtra(AlarmScheduler.EXTRA_TRIGGER_LABEL) ?: "রিভিশন অ্যালার্ম"
+        val alarmId = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_ID) ?: ""
 
         ensureNotificationChannel(context)
 
@@ -34,6 +35,7 @@ class AlarmReceiver : BroadcastReceiver() {
             putExtra(AlarmScheduler.EXTRA_TRIGGER_TYPE, type)
             putExtra(AlarmScheduler.EXTRA_TRIGGER_TARGET_ID, targetId)
             putExtra(AlarmScheduler.EXTRA_TRIGGER_LABEL, label)
+            putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
         }
 
         val fullScreenPendingIntent = PendingIntent.getActivity(
@@ -68,7 +70,7 @@ class AlarmReceiver : BroadcastReceiver() {
         }
 
         // Repeat every minute until opened/acknowledged
-        AlarmScheduler.scheduleOneMinuteRepeat(context, type, targetId, label)
+        AlarmScheduler.scheduleOneMinuteRepeat(context, type, targetId, label, alarmId)
     }
 
     private fun ensureNotificationChannel(context: Context) {
@@ -105,7 +107,8 @@ class BootReceiver : BroadcastReceiver() {
                     notes = dao.getAllNotesOnce(),
                     paragraphs = dao.getAllParagraphsOnce(),
                     vocabLists = dao.getAllVocabListsOnce(),
-                    vocabWords = dao.getAllVocabWordsOnce()
+                    vocabWords = dao.getAllVocabWordsOnce(),
+                    alarms = dao.getAllAlarmsOnce()
                 )
                 AlarmScheduler.scheduleNextAlarm(context, next)
             } finally {

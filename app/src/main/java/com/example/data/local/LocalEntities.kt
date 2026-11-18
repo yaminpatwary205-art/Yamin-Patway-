@@ -161,6 +161,30 @@ data class PendingDeleteEntity(
     val docId: String
 )
 
+@Entity(tableName = "revision_alarms")
+data class RevisionAlarmEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val enabled: Boolean = true,
+    val scheduleType: String = "interval", // "interval" or "clock"
+    val intervalMinutes: Int = 15,
+    val hourOfDay: Int = 8,
+    val minute: Int = 0,
+    val repeatDaysCsv: String = "", // "" = daily, else comma-separated Calendar.DAY_OF_WEEK (1..7)
+    val useActiveHours: Boolean = false,
+    val activeStartMinutes: Int = 8 * 60,
+    val activeEndMinutes: Int = 22 * 60,
+    val selectedBookIds: List<String> = emptyList(),
+    val selectedChapterIds: List<String> = emptyList(),
+    val selectedNoteIds: List<String> = emptyList(),
+    val selectedParagraphIds: List<String> = emptyList(),
+    val selectedVocabListIds: List<String> = emptyList(),
+    val rotationCursor: Int = 0,
+    val lastTriggeredEpochMs: Long = 0L,
+    val snoozedUntilEpochMs: Long = 0L,
+    val updatedAtEpochMs: Long = System.currentTimeMillis()
+)
+
 object DefaultBooksSeed {
     val books: List<BookEntity> = listOf(
         BookEntity("book_01", "বাংলা প্রথম পত্র", "#E11D48", "auto_stories", 0),

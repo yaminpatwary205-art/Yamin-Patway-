@@ -88,7 +88,7 @@ fun AnimatedMeshBackground(
             val h = size.height
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(primary.copy(alpha = 0.15f), Color.Transparent),
+                    colors = listOf(primary.copy(alpha = 0.09f), Color.Transparent),
                     center = Offset(w * (0.15f + 0.25f * drift1), h * (0.12f + 0.1f * drift2)),
                     radius = w * 0.72f
                 ),
@@ -97,7 +97,7 @@ fun AnimatedMeshBackground(
             )
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(secondary.copy(alpha = 0.11f), Color.Transparent),
+                    colors = listOf(secondary.copy(alpha = 0.07f), Color.Transparent),
                     center = Offset(w * (0.85f - 0.2f * drift2), h * (0.45f + 0.18f * drift1)),
                     radius = w * 0.65f
                 ),
@@ -106,7 +106,7 @@ fun AnimatedMeshBackground(
             )
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(tertiary.copy(alpha = 0.10f), Color.Transparent),
+                    colors = listOf(tertiary.copy(alpha = 0.06f), Color.Transparent),
                     center = Offset(w * (0.3f + 0.35f * drift2), h * (0.88f - 0.12f * drift1)),
                     radius = w * 0.6f
                 ),
@@ -133,12 +133,12 @@ fun GlassCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val surfaceColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+    val surfaceColor = MaterialTheme.colorScheme.surface
     val onSurface = MaterialTheme.colorScheme.onSurface
     val borderBrush = Brush.linearGradient(
         colors = listOf(
-            adaptiveAccent(accentColor).copy(alpha = 0.40f),
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+            adaptiveAccent(accentColor).copy(alpha = 0.50f),
+            MaterialTheme.colorScheme.outline
         )
     )
     if (onClick != null) {

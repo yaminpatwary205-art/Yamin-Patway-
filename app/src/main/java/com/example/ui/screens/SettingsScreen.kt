@@ -276,7 +276,7 @@ fun SettingsScreen(
 
                         FilledTonalButton(
                             onClick = {
-                                val ics = AlarmScheduler.generateIcsContent(state.books, state.paragraphs, state.vocabLists)
+                                val ics = AlarmScheduler.generateIcsContent(state.books, state.paragraphs, state.vocabLists, state.alarms)
                                 shareCacheFile(context, "revision_alarm_schedule.ics", "text/calendar", ics)
                             },
                             modifier = Modifier.fillMaxWidth()

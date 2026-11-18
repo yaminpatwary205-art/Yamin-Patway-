@@ -55,6 +55,7 @@ class RevisionRepository(
     val weakWordsFlow: Flow<List<WeakWordEntity>> = dao.observeWeakWords()
     val translationsFlow: Flow<List<TranslationCacheEntity>> = dao.observeTranslations()
     val statsFlow: Flow<UserStatsEntity> = dao.observeUserStats().map { it ?: UserStatsEntity() }
+    val alarmsFlow: Flow<List<RevisionAlarmEntity>> = dao.observeAlarms()
 
     fun setActiveUser(uid: String?) {
         currentUserId = uid?.takeIf { it.isNotBlank() }
@@ -581,6 +582,82 @@ class RevisionRepository(
         }
     }
 
+    // --- Multiple Custom Alarms ---
+
+    suspend fun saveAlarm(alarm: RevisionAlarmEntity): RevisionAlarmEntity {
+        val now = System.currentTimeMillis()
+        val existing = dao.getAlarmById(alarm.id)
+        val scheduleChanged = existing != null && (
+            existing.scheduleType != alarm.scheduleType ||
+                existing.hourOfDay != alarm.hourOfDay ||
+                existing.minute != alarm.minute ||
+                existing.repeatDaysCsv != alarm.repeatDaysCsv ||
+                existing.intervalMinutes != alarm.intervalMinutes
+            )
+        val normalizedLastTrigger = when {
+            existing == null && alarm.scheduleType == "clock" -> now
+            scheduleChanged -> now
+            else -> existing?.lastTriggeredEpochMs ?: alarm.lastTriggeredEpochMs
+        }
+        val normalized = alarm.copy(
+            id = alarm.id.ifBlank { newId("al") },
+            title = alarm.title.trim().ifBlank { "রিভিশন অ্যালার্ম" }.take(120),
+            intervalMinutes = alarm.intervalMinutes.coerceIn(1, 1440),
+            hourOfDay = alarm.hourOfDay.coerceIn(0, 23),
+            minute = alarm.minute.coerceIn(0, 59),
+            lastTriggeredEpochMs = normalizedLastTrigger,
+            snoozedUntilEpochMs = if (scheduleChanged) 0L else alarm.snoozedUntilEpochMs,
+            updatedAtEpochMs = now
+        )
+        dao.upsertAlarm(normalized)
+        rescheduleAlarms()
+        return normalized
+    }
+
+    suspend fun toggleAlarmEnabled(alarmId: String, enabled: Boolean) {
+        val alarm = dao.getAlarmById(alarmId) ?: return
+        val now = System.currentTimeMillis()
+        val updated = alarm.copy(
+            enabled = enabled,
+            lastTriggeredEpochMs = if (enabled) now else alarm.lastTriggeredEpochMs,
+            snoozedUntilEpochMs = if (enabled) 0L else alarm.snoozedUntilEpochMs,
+            updatedAtEpochMs = now
+        )
+        dao.upsertAlarm(updated)
+        rescheduleAlarms()
+    }
+
+    suspend fun deleteAlarm(alarmId: String) {
+        dao.deleteAlarmById(alarmId)
+        rescheduleAlarms()
+    }
+
+    suspend fun markAlarmTriggered(alarmId: String, advanceCursor: Boolean) {
+        val alarm = dao.getAlarmById(alarmId) ?: return
+        val now = System.currentTimeMillis()
+        val updated = alarm.copy(
+            lastTriggeredEpochMs = now,
+            snoozedUntilEpochMs = 0L,
+            rotationCursor = if (advanceCursor) alarm.rotationCursor + 1 else alarm.rotationCursor,
+            updatedAtEpochMs = now
+        )
+        dao.upsertAlarm(updated)
+        rescheduleAlarms()
+    }
+
+    suspend fun snoozeSingleAlarm(alarmId: String, minutes: Int) {
+        val alarm = dao.getAlarmById(alarmId) ?: return
+        val now = System.currentTimeMillis()
+        val until = now + minutes.coerceIn(1, 120) * 60_000L
+        dao.upsertAlarm(
+            alarm.copy(
+                snoozedUntilEpochMs = until,
+                updatedAtEpochMs = now
+            )
+        )
+        rescheduleAlarms()
+    }
+
     suspend fun snoozeAll(minutes: Int) {
         val until = System.currentTimeMillis() + minutes.coerceIn(1, 120) * 60_000L
         updateStats { it.copy(snoozedUntilEpochMs = until) }
@@ -596,7 +673,8 @@ class RevisionRepository(
             notes = dao.getAllNotesOnce(),
             paragraphs = dao.getAllParagraphsOnce(),
             vocabLists = dao.getAllVocabListsOnce(),
-            vocabWords = dao.getAllVocabWordsOnce()
+            vocabWords = dao.getAllVocabWordsOnce(),
+            alarms = dao.getAllAlarmsOnce()
         )
         AlarmScheduler.scheduleNextAlarm(context, next)
     }
@@ -690,6 +768,30 @@ class RevisionRepository(
                     put("id", wk.id); put("word", wk.word); put("meaningBn", wk.meaningBn)
                     put("sourceType", wk.sourceType); put("mistakeCount", wk.mistakeCount)
                     put("lastMistakeEpochMs", wk.lastMistakeEpochMs)
+                })
+            }
+        })
+
+        root.put("alarms", JSONArray().apply {
+            dao.getAllAlarmsOnce().forEach { al ->
+                put(JSONObject().apply {
+                    put("id", al.id)
+                    put("title", al.title)
+                    put("enabled", al.enabled)
+                    put("scheduleType", al.scheduleType)
+                    put("intervalMinutes", al.intervalMinutes)
+                    put("hourOfDay", al.hourOfDay)
+                    put("minute", al.minute)
+                    put("repeatDaysCsv", al.repeatDaysCsv)
+                    put("useActiveHours", al.useActiveHours)
+                    put("activeStartMinutes", al.activeStartMinutes)
+                    put("activeEndMinutes", al.activeEndMinutes)
+                    put("selectedBookIds", JSONArray(al.selectedBookIds))
+                    put("selectedChapterIds", JSONArray(al.selectedChapterIds))
+                    put("selectedNoteIds", JSONArray(al.selectedNoteIds))
+                    put("selectedParagraphIds", JSONArray(al.selectedParagraphIds))
+                    put("selectedVocabListIds", JSONArray(al.selectedVocabListIds))
+                    put("rotationCursor", al.rotationCursor)
                 })
             }
         })
@@ -835,6 +937,36 @@ class RevisionRepository(
                     )
                 }
                 dao.upsertWeakWords(list)
+            }
+            root.optJSONArray("alarms")?.let { arr ->
+                fun JSONArray?.toStringList(): List<String> =
+                    if (this == null) emptyList() else (0 until length()).map { optString(it) }.filter { it.isNotBlank() }
+
+                val list = (0 until arr.length()).map { i ->
+                    val o = arr.getJSONObject(i)
+                    RevisionAlarmEntity(
+                        id = o.getString("id"),
+                        title = o.optString("title", "রিভিশন অ্যালার্ম"),
+                        enabled = o.optBoolean("enabled", true),
+                        scheduleType = o.optString("scheduleType", "interval"),
+                        intervalMinutes = o.optInt("intervalMinutes", 15).coerceIn(1, 1440),
+                        hourOfDay = o.optInt("hourOfDay", 8).coerceIn(0, 23),
+                        minute = o.optInt("minute", 0).coerceIn(0, 59),
+                        repeatDaysCsv = o.optString("repeatDaysCsv", ""),
+                        useActiveHours = o.optBoolean("useActiveHours", false),
+                        activeStartMinutes = o.optInt("activeStartMinutes", 480),
+                        activeEndMinutes = o.optInt("activeEndMinutes", 1320),
+                        selectedBookIds = o.optJSONArray("selectedBookIds").toStringList(),
+                        selectedChapterIds = o.optJSONArray("selectedChapterIds").toStringList(),
+                        selectedNoteIds = o.optJSONArray("selectedNoteIds").toStringList(),
+                        selectedParagraphIds = o.optJSONArray("selectedParagraphIds").toStringList(),
+                        selectedVocabListIds = o.optJSONArray("selectedVocabListIds").toStringList(),
+                        rotationCursor = o.optInt("rotationCursor", 0),
+                        lastTriggeredEpochMs = now,
+                        updatedAtEpochMs = now
+                    )
+                }
+                dao.upsertAlarms(list)
             }
             syncWithCloudIfSignedIn()
             rescheduleAlarms()

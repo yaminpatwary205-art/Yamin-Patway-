@@ -16,13 +16,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.ListAlt
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -48,7 +48,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var selectedSection by remember { mutableIntStateOf(0) } // 0 = Books, 1 = Paragraphs, 2 = Vocab
+    var selectedSection by remember { mutableIntStateOf(0) } // 0 = Books, 1 = Paragraphs, 2 = Vocab, 3 = Alarms
     var searchQuery by remember { mutableStateOf("") }
     var noteFilter by remember { mutableStateOf("all") } // all, starred, active, paused
     var showWeakWordsSheet by remember { mutableStateOf(false) }
@@ -56,6 +56,8 @@ fun HomeScreen(
     var showAddParagraph by remember { mutableStateOf(false) }
     var editingParagraph by remember { mutableStateOf<ParagraphFileEntity?>(null) }
     var showAddVocabList by remember { mutableStateOf(false) }
+    var showAddAlarm by remember { mutableStateOf(false) }
+    var editingAlarm by remember { mutableStateOf<RevisionAlarmEntity?>(null) }
 
     KeepScreenOnEffect(enabled = state.stats.alarmModeActive)
 
@@ -114,6 +116,12 @@ fun HomeScreen(
                         text = { Text("নতুন শব্দ তালিকা") },
                         modifier = Modifier.testTag("add_vocab_list_fab")
                     )
+                    3 -> ExtendedFloatingActionButton(
+                        onClick = { showAddAlarm = true },
+                        icon = { Icon(Icons.Rounded.AlarmAdd, contentDescription = null) },
+                        text = { Text("নতুন অ্যালার্ম") },
+                        modifier = Modifier.testTag("add_alarm_fab")
+                    )
                 }
             }
         ) { innerPadding ->
@@ -150,22 +158,44 @@ fun HomeScreen(
                             viewModel.repository.updateStats { it.copy(alarmModeActive = active) }
                         }
                     },
-                    onTriggerNow = { viewModel.triggerNextAvailableNow() }
+                    onTriggerNow = { viewModel.triggerNextAvailableNow() },
+                    onOpenAlarms = {
+                        selectedSection = 3
+                        if (state.alarms.isEmpty()) showAddAlarm = true
+                    }
                 )
 
                 Spacer(Modifier.height(10.dp))
 
-                // 3-Section Switcher: Books / Paragraphs / Vocab
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    listOf("বই ও নোট", "প্যারাগ্রাফ", "ভোকাবুলারি").forEachIndexed { idx, label ->
-                        SegmentedButton(
+                // 4-Section Switcher: Books, Alarms, Paragraphs, Vocab (keeps tab_section_0/1/2/3 tags)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        Triple(0, "বই ও নোট", Icons.AutoMirrored.Rounded.MenuBook),
+                        Triple(3, "অ্যালার্ম (${state.alarms.size})", Icons.Rounded.Alarm),
+                        Triple(1, "প্যারাগ্রাফ", Icons.AutoMirrored.Rounded.Article),
+                        Triple(2, "ভোকাবুলারি", Icons.Rounded.Translate)
+                    ).forEach { (idx, label, icon) ->
+                        FilterChip(
                             selected = selectedSection == idx,
                             onClick = { selectedSection = idx },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = 3),
+                            leadingIcon = {
+                                Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = {
+                                Text(label, maxLines = 1, fontWeight = if (selectedSection == idx) FontWeight.Bold else FontWeight.Medium)
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                            ),
                             modifier = Modifier.testTag("tab_section_$idx")
-                        ) {
-                            Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        )
                     }
                 }
 
@@ -193,6 +223,18 @@ fun HomeScreen(
                         repository = viewModel.repository,
                         onOpenList = onOpenVocabList,
                         onPracticeNow = { viewModel.launchVocabListNow(it) }
+                    )
+                    3 -> AlarmsSection(
+                        state = state,
+                        onAddAlarm = { showAddAlarm = true },
+                        onEditAlarm = { editingAlarm = it },
+                        onToggleAlarm = { alarm, enabled ->
+                            scope.launch { viewModel.repository.toggleAlarmEnabled(alarm.id, enabled) }
+                        },
+                        onRunNow = { viewModel.launchCustomAlarmNow(it) },
+                        onDeleteAlarm = { alarm ->
+                            scope.launch { viewModel.repository.deleteAlarm(alarm.id) }
+                        }
                     )
                 }
             }
@@ -321,6 +363,25 @@ fun HomeScreen(
             }
         )
     }
+
+    if (showAddAlarm || editingAlarm != null) {
+        AlarmEditorDialog(
+            existing = editingAlarm,
+            books = state.books,
+            chapters = state.chapters,
+            notes = state.notes,
+            paragraphs = state.paragraphs,
+            vocabLists = state.vocabLists,
+            onDismiss = { showAddAlarm = false; editingAlarm = null },
+            onSave = { alarm ->
+                scope.launch {
+                    viewModel.repository.saveAlarm(alarm)
+                }
+                showAddAlarm = false
+                editingAlarm = null
+            }
+        )
+    }
 }
 
 @Composable
@@ -354,7 +415,8 @@ private fun SyncBadge(status: SyncStatus) {
 private fun DashboardCard(
     state: RevisionUiState,
     onToggleAlarmMode: (Boolean) -> Unit,
-    onTriggerNow: () -> Unit
+    onTriggerNow: () -> Unit,
+    onOpenAlarms: () -> Unit
 ) {
     GlassCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -370,18 +432,19 @@ private fun DashboardCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = state.nextTrigger?.labelBn ?: "যেকোনো বই, প্যারাগ্রাফ বা ভোকাবুলারি যোগ করুন",
+                        text = state.nextTrigger?.labelBn ?: "অ্যালার্ম তৈরি করুন অথবা বই, প্যারাগ্রাফ বা ভোকাব যোগ করুন",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val activeAlarms = state.alarms.count { it.enabled }
                     val activeNotes = state.notes.count { it.overrideEnabled != 0 }
                     val activeParas = state.paragraphs.count { it.enabled && it.lines.isNotEmpty() }
                     val activeVocabs = state.vocabLists.count { l -> l.enabled && state.vocabWords.any { it.listId == l.id && it.enabled } }
-                    if (activeNotes + activeParas + activeVocabs > 0) {
+                    if (activeAlarms + activeNotes + activeParas + activeVocabs > 0) {
                         Text(
-                            text = "একসাথে চালু: নোট ${activeNotes}টি • প্যারাগ্রাফ ${activeParas}টি • ভোকাবুলারি ${activeVocabs}টি",
+                            text = "অ্যালার্ম ${activeAlarms}টি • নোট ${activeNotes}টি • প্যারাগ্রাফ ${activeParas}টি • ভোকাব ${activeVocabs}টি",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
@@ -390,13 +453,30 @@ private fun DashboardCard(
                     }
                 }
 
-                FilledTonalButton(
-                    onClick = onTriggerNow,
-                    modifier = Modifier.testTag("trigger_now_button")
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("রিভিশন")
+                    FilledTonalButton(
+                        onClick = onTriggerNow,
+                        modifier = Modifier.testTag("trigger_now_button")
+                    ) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("রিভিশন")
+                    }
+                    OutlinedButton(
+                        onClick = onOpenAlarms,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp).testTag("dashboard_alarms_button")
+                    ) {
+                        Icon(Icons.Rounded.AlarmAdd, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (state.alarms.isEmpty()) "অ্যালার্ম সেট" else "অ্যালার্ম (${state.alarms.size})",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
                 }
             }
 
@@ -603,17 +683,20 @@ private fun BooksAndNotesSection(
                         onClick = { onOpenBook(book.id) },
                         modifier = Modifier.fillMaxWidth().testTag("book_card_${book.id}")
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(displayAccent.copy(alpha = 0.12f), Color.Transparent)
-                                    )
-                                )
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            // Crisp top accent strip on solid opaque card surface so text contrast is never washed out
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .background(accent)
+                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -680,6 +763,7 @@ private fun BooksAndNotesSection(
                                         )
                                     }
                                 }
+                            }
                             }
                         }
                     }
@@ -914,4 +998,165 @@ private fun ParagraphEditorDialog(
             TextButton(onClick = onDismiss) { Text("বাতিল") }
         }
     )
+}
+
+@Composable
+private fun AlarmsSection(
+    state: RevisionUiState,
+    onAddAlarm: () -> Unit,
+    onEditAlarm: (RevisionAlarmEntity) -> Unit,
+    onToggleAlarm: (RevisionAlarmEntity, Boolean) -> Unit,
+    onRunNow: (RevisionAlarmEntity) -> Unit,
+    onDeleteAlarm: (RevisionAlarmEntity) -> Unit
+) {
+    val nowMs = System.currentTimeMillis()
+    if (state.alarms.isEmpty()) {
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(Icons.Rounded.AlarmAdd, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
+                Text("১ বা একাধিক কাস্টম অ্যালার্ম সেট করুন", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "এখানে অ্যালার্ম তৈরি করে প্রতি অ্যালার্মের জন্য আলাদা সময় ও নির্দিষ্ট অধ্যায়ের নোট, প্যারাগ্রাফ বা ভোকাবুলারি বাছাই করে দিতে পারবেন।",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(
+                    onClick = onAddAlarm,
+                    modifier = Modifier.testTag("empty_create_alarm_button")
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("প্রথম অ্যালার্ম তৈরি করুন")
+                }
+            }
+        }
+    } else {
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 96.dp),
+            modifier = Modifier.fillMaxSize().testTag("alarms_list")
+        ) {
+            items(state.alarms, key = { it.id }) { alarm ->
+                val resolvedItems = remember(alarm, state.books, state.chapters, state.notes, state.paragraphs, state.vocabLists, state.vocabWords) {
+                    AlarmScheduler.resolveAlarmItems(
+                        alarm = alarm,
+                        books = state.books,
+                        chapters = state.chapters,
+                        notes = state.notes,
+                        paragraphs = state.paragraphs,
+                        vocabLists = state.vocabLists,
+                        vocabWords = state.vocabWords
+                    )
+                }
+                val alarmTrigger = AlarmScheduler.computeNextTriggerForAlarm(
+                    alarm = alarm,
+                    nowMs = nowMs,
+                    stats = state.stats,
+                    books = state.books,
+                    chapters = state.chapters,
+                    notes = state.notes,
+                    paragraphs = state.paragraphs,
+                    vocabLists = state.vocabLists,
+                    vocabWords = state.vocabWords
+                )
+                val countdownSec = if (alarmTrigger != null) ((alarmTrigger.nextTriggerEpochMs - nowMs) / 1000L).coerceAtLeast(0L) else -1L
+                val scheduleText = if (alarm.scheduleType == "clock") {
+                    val daysDesc = if (alarm.repeatDaysCsv.isBlank()) "প্রতিদিন" else "নির্বাচিত বার"
+                    "${formatClockTimeBn(alarm.hourOfDay, alarm.minute)} • $daysDesc"
+                } else {
+                    "প্রতি ${alarm.intervalMinutes} মিনিট পরপর" + if (alarm.useActiveHours) " (সকাল ৮-রাত ১০)" else ""
+                }
+
+                GlassCard(
+                    accentColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth().testTag("alarm_card_${alarm.id}")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(alarm.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text(
+                                    scheduleText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Switch(
+                                checked = alarm.enabled,
+                                onCheckedChange = { en -> onToggleAlarm(alarm, en) },
+                                modifier = Modifier.testTag("alarm_switch_${alarm.id}")
+                            )
+                        }
+
+                        val noteCount = resolvedItems.count { it is com.example.alarm.AlarmContentItem.NoteItem }
+                        val paraCount = resolvedItems.count { it is com.example.alarm.AlarmContentItem.ParagraphItem }
+                        val vocabCount = resolvedItems.count { it is com.example.alarm.AlarmContentItem.VocabItem }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = if (resolvedItems.isEmpty()) "কোনো সক্রিয় বিষয় মেলেনি (সম্পাদনা করে যোগ করুন)"
+                                    else "নির্বাচিত বিষয়: নোট ${noteCount}টি • প্যারাগ্রাফ ${paraCount}টি • ভোকাবুলারি ${vocabCount}টি",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (alarm.enabled && countdownSec >= 0L) {
+                                    Text(
+                                        text = "বাজতে বাকি: ${formatCountdownBn(countdownSec)}" +
+                                            if (alarm.snoozedUntilEpochMs > nowMs) " (স্নুজ)" else "",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                } else if (!alarm.enabled) {
+                                    Text(
+                                        text = "অ্যালার্ম বন্ধ রাখা আছে",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledTonalButton(
+                                onClick = { onRunNow(alarm) },
+                                enabled = resolvedItems.isNotEmpty(),
+                                modifier = Modifier.testTag("alarm_run_now_${alarm.id}")
+                            ) {
+                                Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("এখনই চালু")
+                            }
+                            Row {
+                                IconButton(onClick = { onEditAlarm(alarm) }, modifier = Modifier.testTag("alarm_edit_${alarm.id}")) {
+                                    Icon(Icons.Rounded.Edit, contentDescription = "অ্যালার্ম সম্পাদনা")
+                                }
+                                IconButton(onClick = { onDeleteAlarm(alarm) }, modifier = Modifier.testTag("alarm_delete_${alarm.id}")) {
+                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "অ্যালার্ম মুছুন", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

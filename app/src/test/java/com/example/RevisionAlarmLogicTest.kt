@@ -315,15 +315,28 @@ class RevisionAlarmLogicTest {
     }
 
     @Test
-    fun `JSON backup export and import round-trip preserves all data including weakWords and stats`() = runBlocking {
+    fun `JSON backup export and import round-trip preserves all data including alarms, weakWords and stats`() = runBlocking {
         repo.ensureSeeded()
         val bookId = DefaultBooksSeed.books[0].id
         repo.addChapter(bookId, "ব্যাকআপ অধ্যায়")
         val chId = dao.getAllChaptersOnce().single().id
         repo.addNote(bookId, chId, "গুরুত্বপূর্ণ নোট", starred = true)
+        val noteId = dao.getAllNotesOnce().single().id
         repo.addOrUpdateParagraph(null, "Para 1", "First. Second.", 20, memoryMode = true, enabled = true)
+        val paraId = dao.getAllParagraphsOnce().single().id
         repo.addVocabList("Vocab 1", 10, reverseMode = true, rawBulkWords = "lucid - স্পষ্ট")
         repo.addOrIncrementWeakWord("ephemeral", "ক্ষণস্থায়ী", "vocab")
+        repo.saveAlarm(
+            RevisionAlarmEntity(
+                id = "al_backup_1",
+                title = "সকালের রুটিন",
+                scheduleType = "clock",
+                hourOfDay = 7,
+                minute = 30,
+                selectedNoteIds = listOf(noteId),
+                selectedParagraphIds = listOf(paraId)
+            )
+        )
         repo.updateStats { it.copy(themeMode = "dark", defaultSnoozeMinutes = 10, streakCount = 4) }
 
         val json = repo.exportBackupJson()
@@ -351,6 +364,11 @@ class RevisionAlarmLogicTest {
         assertEquals(1, dao2.getAllVocabListsOnce().size)
         assertEquals(1, dao2.getAllVocabWordsOnce().size)
         assertEquals(1, dao2.getAllWeakWordsOnce().size)
+        assertEquals(1, dao2.getAllAlarmsOnce().size)
+        val importedAlarm = dao2.getAllAlarmsOnce().single()
+        assertEquals("সকালের রুটিন", importedAlarm.title)
+        assertEquals(listOf(noteId), importedAlarm.selectedNoteIds)
+        assertEquals(listOf(paraId), importedAlarm.selectedParagraphIds)
         val importedStats = dao2.getUserStatsOnce()!!
         assertEquals("dark", importedStats.themeMode)
         assertEquals(10, importedStats.defaultSnoozeMinutes)
@@ -363,11 +381,166 @@ class RevisionAlarmLogicTest {
         val ics = AlarmScheduler.generateIcsContent(
             books = listOf(DefaultBooksSeed.books[0]),
             paragraphs = listOf(ParagraphFileEntity("p1", "Winter", "Cold.", listOf("Cold."))),
-            vocabLists = listOf(VocabListEntity("v1", "Unit 1"))
+            vocabLists = listOf(VocabListEntity("v1", "Unit 1")),
+            alarms = listOf(RevisionAlarmEntity("al1", "Evening Drill", scheduleType = "clock", hourOfDay = 19, minute = 0))
         )
         assertTrue(ics.contains("BEGIN:VCALENDAR"))
         assertTrue(ics.contains("BEGIN:VEVENT"))
         assertTrue(ics.contains("BEGIN:VALARM"))
+        assertTrue(ics.contains("Evening Drill"))
         assertTrue(ics.contains("END:VCALENDAR"))
+    }
+
+    @Test
+    fun `multiple custom alarms filter granular notes, paragraphs, vocab and rotate cleanly`() = runBlocking {
+        repo.ensureSeeded()
+        val book = DefaultBooksSeed.books[0]
+        repo.addChapter(book.id, "অধ্যায় ১")
+        val ch1 = dao.getAllChaptersOnce().single()
+        repo.addNote(book.id, ch1.id, "নির্বাচিত নোট ১")
+        repo.addNote(book.id, ch1.id, "বাদ দেওয়া নোট ২")
+        val allNotes = dao.getAllNotesOnce()
+        val note1 = allNotes.first { it.content == "নির্বাচিত নোট ১" }
+
+        repo.addOrUpdateParagraph(null, "Environment", "Trees give us oxygen. Protect forests. Plant more trees.", 15, false, true)
+        val para = dao.getAllParagraphsOnce().single()
+        assertEquals(3, para.lines.size)
+
+        repo.addVocabList("Daily Words", 20, false, "candid - স্পষ্টভাষী")
+        val vList = dao.getAllVocabListsOnce().single()
+
+        val alarm1 = repo.saveAlarm(
+            RevisionAlarmEntity(
+                id = "al_multi_1",
+                title = "অ্যালার্ম ১",
+                scheduleType = "interval",
+                intervalMinutes = 10,
+                selectedNoteIds = listOf(note1.id),
+                selectedParagraphIds = listOf(para.id),
+                selectedVocabListIds = listOf(vList.id),
+                lastTriggeredEpochMs = 1_000_000L
+            )
+        )
+        val alarm2 = repo.saveAlarm(
+            RevisionAlarmEntity(
+                id = "al_multi_2",
+                title = "অ্যালার্ম ২",
+                scheduleType = "interval",
+                intervalMinutes = 25,
+                selectedChapterIds = listOf(ch1.id),
+                lastTriggeredEpochMs = 1_000_000L
+            )
+        )
+
+        val resolved1 = AlarmScheduler.resolveAlarmItems(
+            alarm = alarm1,
+            books = dao.getAllBooksOnce(),
+            chapters = dao.getAllChaptersOnce(),
+            notes = dao.getAllNotesOnce(),
+            paragraphs = dao.getAllParagraphsOnce(),
+            vocabLists = dao.getAllVocabListsOnce(),
+            vocabWords = dao.getAllVocabWordsOnce()
+        )
+        // Must contain ONLY note1, para, vList (never note2!)
+        assertEquals(3, resolved1.size)
+        assertEquals(listOf(note1.id, para.id, vList.id), resolved1.map { it.itemId })
+
+        val resolved2 = AlarmScheduler.resolveAlarmItems(
+            alarm = alarm2,
+            books = dao.getAllBooksOnce(),
+            chapters = dao.getAllChaptersOnce(),
+            notes = dao.getAllNotesOnce(),
+            paragraphs = dao.getAllParagraphsOnce(),
+            vocabLists = dao.getAllVocabListsOnce(),
+            vocabWords = dao.getAllVocabWordsOnce()
+        )
+        assertEquals(2, resolved2.size)
+
+        // Advance cursor on alarm1 rotates to paragraph, then vocab
+        repo.markAlarmTriggered(alarm1.id, advanceCursor = true)
+        val trigAfterOne = AlarmScheduler.computeNextTriggerForAlarm(
+            alarm = dao.getAlarmById(alarm1.id)!!,
+            nowMs = System.currentTimeMillis(),
+            stats = UserStatsEntity(),
+            books = dao.getAllBooksOnce(),
+            chapters = dao.getAllChaptersOnce(),
+            notes = dao.getAllNotesOnce(),
+            paragraphs = dao.getAllParagraphsOnce(),
+            vocabLists = dao.getAllVocabListsOnce(),
+            vocabWords = dao.getAllVocabWordsOnce()
+        )!!
+        assertEquals("paragraph", trigAfterOne.resolvedType)
+        assertEquals(para.id, trigAfterOne.resolvedTargetId)
+
+        // Snooze ONLY alarm1; alarm2 remains unsnoozed
+        repo.snoozeSingleAlarm(alarm1.id, 15)
+        assertTrue(dao.getAlarmById(alarm1.id)!!.snoozedUntilEpochMs > System.currentTimeMillis())
+        assertEquals(0L, dao.getAlarmById(alarm2.id)!!.snoozedUntilEpochMs)
+    }
+
+    @Test
+    fun `clock alarm schedules exact daily time and rolls to next allowed day after firing`() {
+        val nowCal = Calendar.getInstance().apply {
+            set(2026, Calendar.JUNE, 15, 7, 45, 0) // Monday 07:45
+            set(Calendar.MILLISECOND, 0)
+        }
+        val nextBefore = AlarmScheduler.computeNextClockTriggerMs(
+            nowMs = nowCal.timeInMillis,
+            lastTriggeredEpochMs = 0L,
+            hourOfDay = 8,
+            minute = 30,
+            repeatDaysCsv = ""
+        )
+        val resCal = Calendar.getInstance().apply { timeInMillis = nextBefore }
+        assertEquals(15, resCal.get(Calendar.DAY_OF_MONTH))
+        assertEquals(8, resCal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(30, resCal.get(Calendar.MINUTE))
+
+        // After firing at 08:31 Monday, next occurrence must roll to Tuesday 08:30
+        val firedAtCal = Calendar.getInstance().apply {
+            set(2026, Calendar.JUNE, 15, 8, 31, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val nextAfter = AlarmScheduler.computeNextClockTriggerMs(
+            nowMs = firedAtCal.timeInMillis,
+            lastTriggeredEpochMs = firedAtCal.timeInMillis,
+            hourOfDay = 8,
+            minute = 30,
+            repeatDaysCsv = ""
+        )
+        val afterCal = Calendar.getInstance().apply { timeInMillis = nextAfter }
+        assertEquals(16, afterCal.get(Calendar.DAY_OF_MONTH))
+        assertEquals(8, afterCal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(30, afterCal.get(Calendar.MINUTE))
+    }
+
+    @Test
+    fun `migration 1 to 2 creates revision_alarms table cleanly`() {
+        val helperDb = android.database.sqlite.SQLiteDatabase.create(null)
+        val frameworkDb = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory()
+        assertNotNull(frameworkDb)
+        helperDb.close()
+        // Verify MIGRATION_1_2 SQL executes without syntax error on an actual SupportSQLiteDatabase
+        val openDb = context.openOrCreateDatabase("migration_test_check.db", Context.MODE_PRIVATE, null)
+        openDb.execSQL("DROP TABLE IF EXISTS revision_alarms")
+        val supportDb = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name("migration_verify.db")
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(2) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                    AppDatabase.MIGRATION_1_2.migrate(db)
+                }
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+            })
+            .build()
+        val conn = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(supportDb).writableDatabase
+        conn.execSQL("INSERT INTO revision_alarms VALUES ('id1','Test',1,'interval',15,8,0,'',0,480,1320,'[]','[]','[]','[]','[]',0,0,0,100)")
+        val cursor = conn.query("SELECT title FROM revision_alarms WHERE id='id1'")
+        assertTrue(cursor.moveToFirst())
+        assertEquals("Test", cursor.getString(0))
+        cursor.close()
+        conn.close()
+        openDb.close()
+        context.deleteDatabase("migration_test_check.db")
+        context.deleteDatabase("migration_verify.db")
     }
 }

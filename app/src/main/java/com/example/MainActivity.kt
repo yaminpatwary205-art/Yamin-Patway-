@@ -36,7 +36,7 @@ import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private var pendingAlarmIntent by mutableStateOf<Pair<String?, String?>?>(null)
+    private var pendingAlarmIntent by mutableStateOf<Triple<String?, String?, String?>?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(pendingAlarmIntent) {
                         val trigger = pendingAlarmIntent
                         if (trigger != null) {
-                            vm.handleIncomingNotificationTrigger(trigger.first, trigger.second)
+                            vm.handleIncomingNotificationTrigger(trigger.first, trigger.second, trigger.third)
                             pendingAlarmIntent = null
                         }
                     }
@@ -157,7 +157,8 @@ class MainActivity : ComponentActivity() {
         if (intent?.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_TRIGGERED, false) == true) {
             val type = intent.getStringExtra(AlarmScheduler.EXTRA_TRIGGER_TYPE)
             val targetId = intent.getStringExtra(AlarmScheduler.EXTRA_TRIGGER_TARGET_ID)
-            pendingAlarmIntent = type to targetId
+            val alarmId = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_ID)
+            pendingAlarmIntent = Triple(type, targetId, alarmId)
         }
     }
 }

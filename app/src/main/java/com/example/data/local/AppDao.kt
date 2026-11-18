@@ -188,4 +188,23 @@ interface AppDao {
 
     @Query("DELETE FROM pending_deletes WHERE compositeKey = :compositeKey")
     suspend fun removePendingDelete(compositeKey: String)
+
+    // Custom Multi-Alarms
+    @Query("SELECT * FROM revision_alarms ORDER BY updatedAtEpochMs ASC")
+    fun observeAlarms(): Flow<List<RevisionAlarmEntity>>
+
+    @Query("SELECT * FROM revision_alarms ORDER BY updatedAtEpochMs ASC")
+    suspend fun getAllAlarmsOnce(): List<RevisionAlarmEntity>
+
+    @Query("SELECT * FROM revision_alarms WHERE id = :id LIMIT 1")
+    suspend fun getAlarmById(id: String): RevisionAlarmEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAlarm(alarm: RevisionAlarmEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAlarms(alarms: List<RevisionAlarmEntity>)
+
+    @Query("DELETE FROM revision_alarms WHERE id = :id")
+    suspend fun deleteAlarmById(id: String)
 }
