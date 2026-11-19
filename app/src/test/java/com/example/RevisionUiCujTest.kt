@@ -153,18 +153,18 @@ class RevisionUiCujTest {
     }
 
     @Test
-    fun `paragraph popup displays single line, Bengali meaning, and checks typing accuracy`() {
+    fun `paragraph popup always shows only single line, has copy buttons, and checks typing accuracy`() {
         val para = ParagraphFileEntity(
             id = "p1",
             title = "A Rainy Day",
             rawText = "The sky is cloudy. Rain falls softly.",
             lines = listOf("The sky is cloudy.", "Rain falls softly."),
-            currentLineIndex = 0
+            currentLineIndex = 0,
+            memoryMode = true
         )
 
         runBlocking {
             dao.upsertParagraph(para)
-            repo.saveManualSingleTranslation("The sky is cloudy.", "আকাশ মেঘলা।")
         }
 
         composeRule.setContent {
@@ -186,10 +186,22 @@ class RevisionUiCujTest {
         }
 
         composeRule.waitUntil(timeoutMillis = 5000) {
-            composeRule.onAllNodesWithText("আকাশ মেঘলা।").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("paragraph_line_text").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("The sky is cloudy.").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("আকাশ মেঘলা।").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("paragraph_line_text").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("The sky is cloudy.").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Rain falls softly.").assertCountEquals(0)
+        composeRule.onAllNodesWithText("অনুবাদ হচ্ছে...", substring = true).assertCountEquals(0)
+
+        // Tap line copy & verify clipboard content
+        composeRule.onNodeWithTag("copy_paragraph_line_button").performScrollTo().performClick()
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        assertEquals("The sky is cloudy.", cm.primaryClip?.getItemAt(0)?.text?.toString())
+
+        // Tap full text copy & verify entire paragraph copies
+        composeRule.onNodeWithTag("copy_full_paragraph_button").performScrollTo().performClick()
+        assertEquals("The sky is cloudy. Rain falls softly.", cm.primaryClip?.getItemAt(0)?.text?.toString())
+
         composeRule.onNodeWithTag("paragraph_typing_input").performScrollTo().performTextInput("The sky is cloudy.")
         composeRule.onNodeWithTag("paragraph_check_button").performScrollTo().performClick()
 
@@ -199,8 +211,8 @@ class RevisionUiCujTest {
     }
 
     @Test
-    fun `vocab popup next button advances to a different word even after mistake`() {
-        val list = VocabListEntity("vl1", "Unit 1")
+    fun `vocab popup always keeps English word visible with copy button and advances on Next`() {
+        val list = VocabListEntity("vl1", "Unit 1", reverseMode = true)
         val w1 = VocabWordEntity("w1", "vl1", "resilient", "দৃঢ়চেতা")
         val w2 = VocabWordEntity("w2", "vl1", "serene", "শান্ত")
 
@@ -233,9 +245,14 @@ class RevisionUiCujTest {
         val firstWord = (viewModel.uiState.value.activePopup as ActivePopup.VocabPopup).word
         val expectedOtherWord = if (firstWord.id == w1.id) w2.word else w1.word
 
-        // Both English word AND Bengali meaning must be visible in front by default
+        // English word is ALWAYS visible even if legacy reverseMode flag was true
         composeRule.onNodeWithTag("vocab_front_word").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText(firstWord.meaningBn).performScrollTo().assertIsDisplayed()
+
+        // Copy word button copies the English word to clipboard
+        composeRule.onNodeWithTag("copy_vocab_word_button").performScrollTo().performClick()
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        assertEquals(firstWord.word, cm.primaryClip?.getItemAt(0)?.text?.toString())
 
         composeRule.onNodeWithTag("vocab_typing_input").performScrollTo().performTextInput("wrong")
         composeRule.onNodeWithTag("vocab_check_button").performScrollTo().performClick()
@@ -253,10 +270,12 @@ class RevisionUiCujTest {
     }
 
     @Test
-    fun `dark and light themes provide high-contrast LocalContentColor and readable subject accents`() {
+    fun `dark and light pink-red themes provide high-contrast text and pink-red surfaces`() {
         var darkContentColor = androidx.compose.ui.graphics.Color.Unspecified
         var darkCardContentColor = androidx.compose.ui.graphics.Color.Unspecified
         var darkSurfaceColor = androidx.compose.ui.graphics.Color.Unspecified
+        var lightBgColor = androidx.compose.ui.graphics.Color.Unspecified
+        var lightContentColor = androidx.compose.ui.graphics.Color.Unspecified
 
         composeRule.setContent {
             RevisionAlarmTheme(themeMode = "dark") {
@@ -268,6 +287,10 @@ class RevisionUiCujTest {
                     }
                 }
             }
+            RevisionAlarmTheme(themeMode = "light") {
+                lightBgColor = androidx.compose.material3.MaterialTheme.colorScheme.background
+                lightContentColor = androidx.compose.material3.LocalContentColor.current
+            }
         }
 
         assertNotEquals(androidx.compose.ui.graphics.Color.Black, darkContentColor)
@@ -275,6 +298,14 @@ class RevisionUiCujTest {
         assertTrue(
             "Dark card text contrast must be high",
             contrastRatio(darkCardContentColor, darkSurfaceColor) >= 10.0
+        )
+        assertTrue(
+            "Light background must be pink-red (red channel highest)",
+            lightBgColor.red > lightBgColor.green && lightBgColor.red > lightBgColor.blue
+        )
+        assertTrue(
+            "Light text on pink-red background must have high contrast",
+            contrastRatio(lightContentColor, lightBgColor) >= 10.0
         )
 
         com.example.ui.theme.SubjectColors.forEach { hex ->

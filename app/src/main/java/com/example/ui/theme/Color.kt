@@ -4,43 +4,45 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 
-// Primary Brand Palette — Deep Indigo & Radiant Amber/Coral
-val IndigoPrimary = Color(0xFF4338CA)
-val IndigoLightPrimary = Color(0xFFA5B4FC)
+// Primary Brand Palette — Pink-Red (গোলাপি লাল) & Crisp Contrast Accents
+val PinkRedPrimary = Color(0xFFD81B60)
+val PinkRedLightPrimary = Color(0xFFFF7AA8)
+val IndigoPrimary = PinkRedPrimary
+val IndigoLightPrimary = PinkRedLightPrimary
 val AmberAccent = Color(0xFFD97706)
 val CoralSecondary = Color(0xFFE11D48)
 val EmeraldSuccess = Color(0xFF059669)
-val RoseError = Color(0xFFDC2626)
+val RoseError = Color(0xFFB91C1C)
 
-// Light Theme Surfaces (Crisp Off-White Canvas + Pure White Opaque Cards + Ink-Black Text)
-val LightBackground = Color(0xFFF1F4FB)
-val LightSurface = Color(0xFFFFFFFF)
-val LightSurfaceVariant = Color(0xFFE6ECF9)
-val LightOnSurface = Color(0xFF0B1120)
-val LightOnSurfaceVariant = Color(0xFF334155)
-val LightOutline = Color(0xFFCBD5E1)
+// Light Theme Surfaces (Soft Pink-Red Canvas + Bright Blush-White Cards + Deep Burgundy-Ink Text)
+val LightBackground = Color(0xFFFFE4EC)
+val LightSurface = Color(0xFFFFF7F9)
+val LightSurfaceVariant = Color(0xFFFFD6E3)
+val LightOnSurface = Color(0xFF230611)
+val LightOnSurfaceVariant = Color(0xFF5E1E34)
+val LightOutline = Color(0xFFF09AB5)
 
-// Dark Theme Surfaces (Deep Slate Canvas + Elevated Navy Cards + Pure White Text)
-val DarkBackground = Color(0xFF090D16)
-val DarkSurface = Color(0xFF161D31)
-val DarkSurfaceVariant = Color(0xFF222B45)
+// Dark Theme Surfaces (Deep Wine-Crimson Canvas + Elevated Rose-Maroon Cards + Pure White Text)
+val DarkBackground = Color(0xFF230812)
+val DarkSurface = Color(0xFF330F1D)
+val DarkSurfaceVariant = Color(0xFF471629)
 val DarkOnSurface = Color(0xFFFFFFFF)
-val DarkOnSurfaceVariant = Color(0xFFD1D9E8)
-val DarkOutline = Color(0xFF3B476B)
+val DarkOnSurfaceVariant = Color(0xFFFFD6E3)
+val DarkOutline = Color(0xFF833352)
 
 // Subject Palette Options
 val SubjectColors = listOf(
-    "#E11D48", // Rose
+    "#E11D48", // Rose Red
+    "#DB2777", // Deep Pink
+    "#BE123C", // Crimson
     "#7C3AED", // Violet
     "#2563EB", // Royal Blue
     "#0891B2", // Cyan
     "#059669", // Emerald
     "#D97706", // Amber
     "#EA580C", // Orange
-    "#DB2777", // Pink
     "#4F46E5", // Indigo
-    "#0D9488", // Teal
-    "#0284C7"  // Sky
+    "#0D9488"  // Teal
 )
 
 /**

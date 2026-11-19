@@ -81,6 +81,22 @@ class RevisionRepository(
         if (stats == null) {
             dao.upsertUserStats(UserStatsEntity(todayDate = todayDayString()))
         }
+        // Re-split any legacy paragraphs stored as a single oversized line
+        val existingParas = dao.getAllParagraphsOnce()
+        val fixedParas = existingParas.mapNotNull { p ->
+            val cleanLines = splitParagraphIntoLines(p.rawText)
+            if (cleanLines.isNotEmpty() && (p.lines.size <= 1 && cleanLines.size > 1 || p.lines.any { it.length > 120 })) {
+                p.copy(
+                    lines = cleanLines.take(300),
+                    currentLineIndex = p.currentLineIndex.coerceIn(0, cleanLines.lastIndex)
+                )
+            } else {
+                null
+            }
+        }
+        if (fixedParas.isNotEmpty()) {
+            dao.upsertParagraphs(fixedParas)
+        }
     }
 
     suspend fun syncWithCloudIfSignedIn(): Result<SyncStatus> {
@@ -990,11 +1006,58 @@ class RevisionRepository(
         }
 
         fun splitParagraphIntoLines(rawText: String): List<String> {
-            return rawText
+            val normalized = rawText
                 .replace("\r\n", "\n")
-                .split(Regex("(?<=[.!?])\\s+|\\n+"))
+                .trim()
+            if (normalized.isEmpty()) return emptyList()
+
+            // First split on explicit newlines, sentence terminators (. ! ? । ;), even when space after period was omitted
+            val rawSentences = normalized
+                .split(Regex("\\n+|(?<=[.!?।;])(?:\\s+|(?=[A-Za-z0-9\"'(]))"))
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
+
+            val result = mutableListOf<String>()
+            val maxChars = 90
+            val maxWords = 14
+
+            fun appendChunkedByWords(segment: String) {
+                val words = segment.split(Regex("\\s+")).filter { it.isNotBlank() }
+                if (words.size <= maxWords && segment.length <= maxChars) {
+                    result += segment
+                    return
+                }
+                val current = StringBuilder()
+                var wordCount = 0
+                for (w in words) {
+                    val candidateLen = if (current.isEmpty()) w.length else current.length + 1 + w.length
+                    if (current.isNotEmpty() && (candidateLen > maxChars || wordCount >= maxWords)) {
+                        result += current.toString()
+                        current.clear()
+                        wordCount = 0
+                    }
+                    if (current.isNotEmpty()) current.append(' ')
+                    current.append(w)
+                    wordCount++
+                }
+                if (current.isNotEmpty()) result += current.toString()
+            }
+
+            for (sentence in rawSentences) {
+                if (sentence.length <= maxChars && sentence.split(Regex("\\s+")).size <= maxWords) {
+                    result += sentence
+                } else {
+                    // Break long sentences cleanly at commas/colons first, then by word budget
+                    val clauses = sentence
+                        .split(Regex("(?<=[,:])\\s+"))
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+                    for (clause in clauses) {
+                        appendChunkedByWords(clause)
+                    }
+                }
+            }
+            return result
         }
 
         fun parseBulkVocab(rawInput: String): List<Pair<String, String>> {

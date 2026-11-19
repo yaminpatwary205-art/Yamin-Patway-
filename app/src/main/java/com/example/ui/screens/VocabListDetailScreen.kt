@@ -132,12 +132,10 @@ fun VocabListDetailScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                FilterChip(
-                                    selected = vocabList.reverseMode,
-                                    onClick = {
-                                        scope.launch { repository.updateVocabList(vocabList.copy(reverseMode = !vocabList.reverseMode)) }
-                                    },
-                                    label = { Text("শব্দ লুকান (শুধু অর্থ দেখে টাইপ)") }
+                                Text(
+                                    "পপ-আপে শব্দ সামনে দেখাবে (১-ট্যাপ কপি সহ)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 TextButton(onClick = { showEditList = true }) {
                                     Text("প্রতি ${vocabList.intervalMinutes} মি.")
@@ -150,7 +148,7 @@ fun VocabListDetailScreen(
                 items(words, key = { it.id }) { word ->
                     val isSelected = word.id in selectedIds
                     GlassCard(
-                        accentColor = Color(0xFF7C3AED),
+                        accentColor = MaterialTheme.colorScheme.primary,
                         onClick = {
                             if (bulkMode) {
                                 selectedIds = if (isSelected) selectedIds - word.id else selectedIds + word.id
@@ -176,7 +174,7 @@ fun VocabListDetailScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(word.word, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Text(
-                                    text = word.meaningBn.ifBlank { "অর্থ পপ-আপে স্বয়ংক্রিয়ভাবে অনুবাদ হবে" },
+                                    text = word.meaningBn.ifBlank { "দেখে টাইপ বা কপি করে ট্রান্সলেটরে দেখুন" },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

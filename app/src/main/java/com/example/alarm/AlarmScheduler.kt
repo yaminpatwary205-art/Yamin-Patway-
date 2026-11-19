@@ -1,10 +1,16 @@
 package com.example.alarm
 
 import android.app.AlarmManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
+import com.example.MainActivity
 import com.example.data.local.*
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -102,10 +108,37 @@ object AlarmScheduler {
     const val EXTRA_TRIGGER_LABEL = "extra_trigger_label"
     const val EXTRA_ALARM_ID = "extra_alarm_id"
     const val EXTRA_IS_REPEAT = "extra_is_repeat"
-    const val NOTIFICATION_CHANNEL_ID = "revision_alarm_channel"
+    const val NOTIFICATION_CHANNEL_ID = "revision_alarm_channel_v2"
     const val NOTIFICATION_ID = 1001
     private const val ALARM_REQUEST_CODE = 2001
     private const val REPEAT_REQUEST_CODE = 2002
+
+    fun ensureNotificationChannel(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            if (nm.getNotificationChannel(NOTIFICATION_CHANNEL_ID) == null) {
+                val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                val audioAttrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                val channel = NotificationChannel(
+                    NOTIFICATION_CHANNEL_ID,
+                    "Revision Alarms & Sound",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Full-screen study revision reminders with alarm sound"
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 450, 350, 450, 700)
+                    setSound(alarmUri, audioAttrs)
+                    setBypassDnd(true)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                }
+                nm.createNotificationChannel(channel)
+            }
+        }
+    }
 
     fun resolveNoteSchedule(
         book: BookEntity,
@@ -446,6 +479,15 @@ object AlarmScheduler {
         }
 
         val triggerAt = maxOf(System.currentTimeMillis() + 3_000L, trigger.nextTriggerEpochMs)
+        val showIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val showPi = PendingIntent.getActivity(
+            context,
+            2005,
+            showIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val canExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             alarmManager.canScheduleExactAlarms()
         } else {
@@ -453,12 +495,16 @@ object AlarmScheduler {
         }
         try {
             if (canExact) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, showPi), pi)
             } else {
                 alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
             }
         } catch (_: SecurityException) {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            try {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            } catch (_: SecurityException) {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            }
         }
     }
 
@@ -485,8 +531,13 @@ object AlarmScheduler {
         )
         val nextMinute = System.currentTimeMillis() + 60_000L
         try {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextMinute, pi)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextMinute, pi)
+            } else {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextMinute, pi)
+            }
         } catch (_: SecurityException) {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextMinute, pi)
         }
     }
 

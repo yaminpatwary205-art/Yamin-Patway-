@@ -4,8 +4,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -21,7 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -32,8 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.NoteEntity
 import com.example.ui.ActivePopup
-import com.example.ui.PopupTranslationState
 import com.example.ui.RevisionViewModel
+import com.example.ui.theme.LocalIsDarkTheme
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -48,13 +50,11 @@ fun RevisionPopupOverlay(
     BackHandler(enabled = true) {}
     KeepScreenOnEffect(enabled = true)
 
-    val gradientColors = when (popup) {
-        is ActivePopup.NotePopup -> {
-            val accent = adaptiveAccent(parseColorHex(popup.book.colorHex))
-            listOf(accent.copy(alpha = 0.18f), MaterialTheme.colorScheme.background)
-        }
-        is ActivePopup.ParagraphPopup -> listOf(adaptiveAccent(Color(0xFF2563EB)).copy(alpha = 0.18f), MaterialTheme.colorScheme.background)
-        is ActivePopup.VocabPopup -> listOf(adaptiveAccent(Color(0xFF7C3AED)).copy(alpha = 0.18f), MaterialTheme.colorScheme.background)
+    val isDark = LocalIsDarkTheme.current
+    val overlayBrush = if (isDark) {
+        Brush.verticalGradient(listOf(Color(0xFF3A0C1F), Color(0xFF230812)))
+    } else {
+        Brush.verticalGradient(listOf(Color(0xFFFFD1E0), Color(0xFFFFE9F0)))
     }
 
     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
@@ -62,84 +62,173 @@ fun RevisionPopupOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
-                .background(Brush.verticalGradient(gradientColors))
+                .background(overlayBrush)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(16.dp)
                 .testTag("revision_popup_overlay")
         ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .widthIn(max = 600.dp)
-                .align(Alignment.Center)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Top Alarm Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .widthIn(max = 600.dp)
+                    .align(Alignment.Center)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
+                // Top Alarm Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AlarmOn,
+                                contentDescription = "রিভিশন অ্যালার্ম",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = popup.alarmTitle?.takeIf { it.isNotBlank() } ?: "রিভিশন অ্যালার্ম",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Text(
+                                text = "দেখে দেখে মনোযোগ দিয়ে অনুশীলন করুন",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = { viewModel.muteAlarmSoundNow() },
+                        modifier = Modifier.testTag("mute_alarm_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.AlarmOn,
-                            contentDescription = "রিভিশন অ্যালার্ম",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Column {
-                        Text(
-                            text = popup.alarmTitle?.takeIf { it.isNotBlank() } ?: "রিভিশন অ্যালার্ম",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "মনোযোগ দিয়ে রিভিশন সম্পন্ন করুন",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            imageVector = Icons.AutoMirrored.Rounded.VolumeOff,
+                            contentDescription = "শব্দ বন্ধ করুন",
+                            tint = MaterialTheme.colorScheme.onBackground
                         )
                     }
                 }
-                IconButton(
-                    onClick = { viewModel.muteAlarmSoundNow() },
-                    modifier = Modifier.testTag("mute_alarm_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.VolumeOff,
-                        contentDescription = "শব্দ বন্ধ করুন"
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                when (popup) {
+                    is ActivePopup.NotePopup -> NotePopupContent(
+                        popup = popup,
+                        viewModel = viewModel,
+                        onToggleStar = { onToggleNoteStar(popup.note) }
+                    )
+                    is ActivePopup.ParagraphPopup -> ParagraphPopupContent(
+                        popup = popup,
+                        defaultSnoozeMinutes = defaultSnoozeMinutes,
+                        viewModel = viewModel
+                    )
+                    is ActivePopup.VocabPopup -> VocabPopupContent(
+                        popup = popup,
+                        defaultSnoozeMinutes = defaultSnoozeMinutes,
+                        viewModel = viewModel
                     )
                 }
             }
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(16.dp))
+@Composable
+private fun CopyActionBar(
+    primaryLabel: String,
+    primaryTextToCopy: String,
+    primaryTestTag: String,
+    secondaryLabel: String? = null,
+    secondaryTextToCopy: String? = null,
+    secondaryTestTag: String? = null
+) {
+    @Suppress("DEPRECATION")
+    val clipboard = LocalClipboardManager.current
+    var copiedMessage by remember { mutableStateOf<String?>(null) }
 
-            when (popup) {
-                is ActivePopup.NotePopup -> NotePopupContent(
-                    popup = popup,
-                    defaultSnoozeMinutes = defaultSnoozeMinutes,
-                    viewModel = viewModel,
-                    onToggleStar = { onToggleNoteStar(popup.note) }
+    LaunchedEffect(copiedMessage) {
+        if (copiedMessage != null) {
+            delay(2000L)
+            copiedMessage = null
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FilledTonalButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(primaryTextToCopy))
+                    copiedMessage = "কপি হয়েছে! চাইলে ট্রান্সলেটরে পেস্ট করে অর্থ দেখুন।"
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .testTag(primaryTestTag),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                 )
-                is ActivePopup.ParagraphPopup -> ParagraphPopupContent(
-                    popup = popup,
-                    defaultSnoozeMinutes = defaultSnoozeMinutes,
-                    viewModel = viewModel
-                )
-                is ActivePopup.VocabPopup -> VocabPopupContent(
-                    popup = popup,
-                    defaultSnoozeMinutes = defaultSnoozeMinutes,
-                    viewModel = viewModel
-                )
+            ) {
+                Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(primaryLabel, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            }
+
+            if (secondaryLabel != null && secondaryTextToCopy != null && secondaryTestTag != null) {
+                OutlinedButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(secondaryTextToCopy))
+                        copiedMessage = "সম্পূর্ণ টেক্সট কপি হয়েছে!"
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .testTag(secondaryTestTag),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Icon(Icons.Rounded.SelectAll, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(secondaryLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                }
             }
         }
+
+        AnimatedVisibility(visible = copiedMessage != null) {
+            val okColor = adaptiveAccent(Color(0xFF059669))
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = okColor.copy(alpha = 0.14f),
+                contentColor = okColor,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(15.dp), tint = okColor)
+                    Text(
+                        text = copiedMessage.orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = okColor
+                    )
+                }
+            }
         }
     }
 }
@@ -147,7 +236,6 @@ fun RevisionPopupOverlay(
 @Composable
 private fun NotePopupContent(
     popup: ActivePopup.NotePopup,
-    defaultSnoozeMinutes: Int,
     viewModel: RevisionViewModel,
     onToggleStar: () -> Unit
 ) {
@@ -211,7 +299,7 @@ private fun NotePopupContent(
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
@@ -221,6 +309,12 @@ private fun NotePopupContent(
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
+
+            CopyActionBar(
+                primaryLabel = "টেক্সট কপি করুন",
+                primaryTextToCopy = popup.note.content,
+                primaryTestTag = "copy_note_button"
+            )
 
             Text(
                 text = "আগের রিভিশন: ${popup.note.revisionCount} বার",
@@ -287,28 +381,11 @@ private fun ParagraphPopupContent(
     viewModel: RevisionViewModel
 ) {
     var typedText by remember(popup.paragraph.id, popup.lineIndex) { mutableStateOf("") }
-    var manualMeaningInput by remember(popup.paragraph.id, popup.lineIndex) { mutableStateOf("") }
-    var retryCounter by remember(popup.paragraph.id, popup.lineIndex) { mutableIntStateOf(0) }
-    var memorySecondsLeft by remember(popup.paragraph.id, popup.lineIndex, popup.paragraph.memoryMode, retryCounter) {
-        mutableStateOf(if (popup.paragraph.memoryMode) 5 else -1)
-    }
-
-    LaunchedEffect(popup.paragraph.id, popup.lineIndex, popup.paragraph.memoryMode, retryCounter) {
-        if (popup.paragraph.memoryMode) {
-            memorySecondsLeft = 5
-            while (memorySecondsLeft > 0) {
-                delay(1000L)
-                memorySecondsLeft--
-            }
-        }
-    }
-
-    val hideEnglishLine = popup.paragraph.memoryMode && memorySecondsLeft == 0 && popup.checkResult == null
     val isLastLine = popup.lineIndex >= popup.paragraph.lines.lastIndex
 
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        accentColor = Color(0xFF2563EB)
+        accentColor = MaterialTheme.colorScheme.primary
     ) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
@@ -320,7 +397,8 @@ private fun ParagraphPopupContent(
                     text = popup.paragraph.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
                 )
                 Surface(
                     shape = RoundedCornerShape(50),
@@ -337,41 +415,42 @@ private fun ParagraphPopupContent(
                 }
             }
 
-            if (popup.paragraph.memoryMode && memorySecondsLeft > 0) {
-                Text(
-                    text = "মেমোরি মোড: $memorySecondsLeft সেকেন্ড পর ইংরেজি লাইন লুকিয়ে যাবে!",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-            }
-
+            // Always show the exact single English line clearly for copy-typing & optional copying
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = if (hideEnglishLine) "•••••• (স্মৃতি থেকে ইংরেজি লাইনটি লিখুন) ••••••" else popup.lineText,
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(14.dp),
-                    color = if (hideEnglishLine) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
-                )
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "নিচের লাইনটি দেখে দেখে টাইপ করুন:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = popup.lineText,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.testTag("paragraph_line_text")
+                    )
+                }
             }
 
-            // Lazy single-line Bengali translation block
-            TranslationBox(
-                translationState = popup.translationState,
-                manualInput = manualMeaningInput,
-                onManualInputChange = { manualMeaningInput = it },
-                onRetry = { viewModel.retryParagraphTranslation() },
-                onSaveManual = { viewModel.saveManualParagraphMeaning(manualMeaningInput) }
+            CopyActionBar(
+                primaryLabel = "লাইন কপি করুন",
+                primaryTextToCopy = popup.lineText,
+                primaryTestTag = "copy_paragraph_line_button",
+                secondaryLabel = "সম্পূর্ণ টেক্সট কপি",
+                secondaryTextToCopy = popup.paragraph.rawText,
+                secondaryTestTag = "copy_full_paragraph_button"
             )
 
             OutlinedTextField(
                 value = typedText,
                 onValueChange = { typedText = it },
-                label = { Text("ইংরেজি লাইনটি হুবহু টাইপ করুন") },
+                label = { Text("উপরের লাইনটি দেখে হুবহু টাইপ করুন") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("paragraph_typing_input"),
@@ -445,7 +524,6 @@ private fun ParagraphPopupContent(
             OutlinedButton(
                 onClick = {
                     typedText = ""
-                    retryCounter++
                     viewModel.resetParagraphRetry()
                 },
                 modifier = Modifier.weight(1f).height(48.dp),
@@ -496,7 +574,6 @@ private fun VocabPopupContent(
 ) {
     var typedWord by remember(popup.word.id) { mutableStateOf("") }
     var checkedCorrect by remember(popup.word.id) { mutableStateOf<Boolean?>(null) }
-    var manualMeaningInput by remember(popup.word.id) { mutableStateOf("") }
     val shakeOffset = remember { Animatable(0f) }
 
     LaunchedEffect(checkedCorrect) {
@@ -507,13 +584,13 @@ private fun VocabPopupContent(
         }
     }
 
-    val vocabAccent = adaptiveAccent(Color(0xFF7C3AED))
+    val vocabAccent = adaptiveAccent(MaterialTheme.colorScheme.primary)
 
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
             .offset { IntOffset(shakeOffset.value.roundToInt(), 0) },
-        accentColor = Color(0xFF7C3AED)
+        accentColor = MaterialTheme.colorScheme.primary
     ) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
@@ -527,76 +604,67 @@ private fun VocabPopupContent(
                     fontWeight = FontWeight.Bold,
                     color = vocabAccent
                 )
-                if (popup.list.reverseMode) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    ) {
-                        Text(
-                            text = "রিভার্স মোড",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-
-            if (!popup.list.reverseMode || checkedCorrect != null) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
+                    Text(
+                        text = "শব্দ দেখে লিখুন",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            // Always show the English word on screen so user can type while looking or copy to translate
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "ইংরেজি শব্দ",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = popup.word.word,
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().testTag("vocab_front_word")
+                    )
+                    if (popup.word.meaningBn.isNotBlank()) {
                         Text(
-                            text = "ইংরেজি শব্দ",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = popup.word.word,
-                            style = MaterialTheme.typography.displaySmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().testTag("vocab_front_word")
+                            text = popup.word.meaningBn,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = vocabAccent,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
-            } else {
-                Text(
-                    text = "বাংলা অর্থ দেখে ইংরেজি শব্দটি লিখুন",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
 
-            TranslationBox(
-                translationState = popup.translationState,
-                manualInput = manualMeaningInput,
-                onManualInputChange = { manualMeaningInput = it },
-                onRetry = { viewModel.retryVocabTranslation() },
-                onSaveManual = { viewModel.saveManualVocabMeaning(manualMeaningInput) }
+            CopyActionBar(
+                primaryLabel = "শব্দ কপি করুন",
+                primaryTextToCopy = popup.word.word,
+                primaryTestTag = "copy_vocab_word_button"
             )
 
             OutlinedTextField(
                 value = typedWord,
                 onValueChange = { typedWord = it },
-                label = {
-                    Text(
-                        if (!popup.list.reverseMode) "ওপরের ইংরেজি শব্দটি দেখে টাইপ করুন"
-                        else "ইংরেজি বানান লিখুন"
-                    )
-                },
+                label = { Text("উপরের ইংরেজি শব্দটি দেখে দেখে টাইপ করুন") },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -667,11 +735,11 @@ private fun VocabPopupContent(
                 modifier = Modifier.weight(1f).height(48.dp).testTag("vocab_next_button"),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF6D28D9),
-                    contentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
-                Text("পরবর্তী", color = Color.White)
+                Text("পরবর্তী", color = MaterialTheme.colorScheme.onPrimary)
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -688,79 +756,6 @@ private fun VocabPopupContent(
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Text("বন্ধ করো")
-            }
-        }
-    }
-}
-
-@Composable
-private fun TranslationBox(
-    translationState: PopupTranslationState,
-    manualInput: String,
-    onManualInputChange: (String) -> Unit,
-    onRetry: () -> Unit,
-    onSaveManual: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
-    ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            when (translationState) {
-                PopupTranslationState.Idle -> Unit
-                PopupTranslationState.Loading -> {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Text("বাংলা অর্থ অনুবাদ হচ্ছে...", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-                is PopupTranslationState.Ready -> {
-                    Text(
-                        text = "বাংলা অর্থ:",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                    )
-                    Text(
-                        text = translationState.meaningBn,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-                is PopupTranslationState.Error -> {
-                    Text(
-                        text = translationState.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedButton(onClick = onRetry, modifier = Modifier.height(40.dp)) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("আবার চেষ্টা")
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = manualInput,
-                            onValueChange = onManualInputChange,
-                            label = { Text("নিজে বাংলা অর্থ লিখুন") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Button(
-                            onClick = onSaveManual,
-                            enabled = manualInput.isNotBlank(),
-                            modifier = Modifier.height(48.dp)
-                        ) {
-                            Text("সংরক্ষণ")
-                        }
-                    }
-                }
             }
         }
     }

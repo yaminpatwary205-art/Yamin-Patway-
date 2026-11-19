@@ -247,6 +247,18 @@ class RevisionAlarmLogicTest {
         assertEquals(3, lines.size)
         assertEquals("A winter morning is misty and cold.", lines[0])
 
+        // Even missing space after period or long unpunctuated run-on text must split into single short lines
+        val noSpaceLines = RevisionRepository.splitParagraphIntoLines("First sentence.Second sentence!Third one.")
+        assertEquals(listOf("First sentence.", "Second sentence!", "Third one."), noSpaceLines)
+
+        val longUnpunctuated = "This is a very long continuous English paragraph pasted without any periods or newlines so that the app still splits it nicely into short manageable single lines for revision"
+        val chunkedLines = RevisionRepository.splitParagraphIntoLines(longUnpunctuated)
+        assertTrue("Long unpunctuated paragraph must split into multiple lines", chunkedLines.size >= 2)
+        assertTrue("Every line must stay concise", chunkedLines.all { it.length <= 95 })
+
+        AlarmScheduler.ensureNotificationChannel(context)
+        assertEquals("revision_alarm_channel_v2", AlarmScheduler.NOTIFICATION_CHANNEL_ID)
+
         val diff = RevisionRepository.compareParagraphWords(
             expectedLine = "Dew drops glisten on the grass.",
             typedLine = "Dew drop glisten on a grass."

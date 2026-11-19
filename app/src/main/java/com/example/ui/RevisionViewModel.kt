@@ -3,8 +3,11 @@ package com.example.ui
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.content.Intent
 import com.example.alarm.AlarmAudioManager
 import com.example.alarm.AlarmContentItem
+import com.example.alarm.AlarmReceiver
+import com.example.alarm.AlarmRingingService
 import com.example.alarm.AlarmScheduler
 import com.example.alarm.ScheduledTrigger
 import com.example.data.ParagraphCheckResult
@@ -224,6 +227,7 @@ class RevisionViewModel(
     }
 
     fun handleIncomingNotificationTrigger(type: String?, targetId: String?, alarmId: String? = null) {
+        AlarmRingingService.stop(context)
         AlarmScheduler.cancelRepeatReminder(context)
         if (type == null || targetId.isNullOrBlank()) {
             triggerNextAvailableNow()
@@ -374,6 +378,7 @@ class RevisionViewModel(
         alarmId: String? = null,
         alarmTitle: String? = null
     ) {
+        AlarmRingingService.stop(context)
         AlarmScheduler.cancelRepeatReminder(context)
         val stats = uiState.value.stats
         audioManager.startAlarmFeedback(stats.soundEnabled, stats.alarmVolume, stats.vibrationEnabled)
@@ -385,20 +390,28 @@ class RevisionViewModel(
         alarmId: String? = null,
         alarmTitle: String? = null
     ) {
+        AlarmRingingService.stop(context)
         AlarmScheduler.cancelRepeatReminder(context)
         val stats = uiState.value.stats
         audioManager.startAlarmFeedback(stats.soundEnabled, stats.alarmVolume, stats.vibrationEnabled)
-        val idx = para.currentLineIndex.coerceIn(0, (para.lines.size - 1).coerceAtLeast(0))
-        val line = para.lines.getOrElse(idx) { "" }
+        val resplit = RevisionRepository.splitParagraphIntoLines(para.rawText)
+        val effectiveLines = if (resplit.size > 1 && (para.lines.size <= 1 || para.lines.any { it.length > 120 })) {
+            resplit
+        } else {
+            para.lines.ifEmpty { resplit }
+        }
+        val normalizedPara = if (effectiveLines != para.lines) para.copy(lines = effectiveLines) else para
+        val idx = normalizedPara.currentLineIndex.coerceIn(0, (effectiveLines.size - 1).coerceAtLeast(0))
+        val line = effectiveLines.getOrElse(idx) { "" }
+        val cached = repository.translationService.let { null }
         _activePopup.value = ActivePopup.ParagraphPopup(
-            paragraph = para,
+            paragraph = normalizedPara,
             lineIndex = idx,
             lineText = line,
-            translationState = PopupTranslationState.Loading,
+            translationState = PopupTranslationState.Idle,
             alarmId = alarmId,
             alarmTitle = alarmTitle
         )
-        translateCurrentParagraphLine(line)
     }
 
     fun retryParagraphTranslation() {
@@ -506,18 +519,15 @@ class RevisionViewModel(
             ) ?: pool.first()
         }
 
+        AlarmRingingService.stop(context)
         audioManager.startAlarmFeedback(stats.soundEnabled, stats.alarmVolume, stats.vibrationEnabled)
 
         val initialTrans = if (picked.meaningBn.isNotBlank()) {
             PopupTranslationState.Ready(picked.meaningBn, fromCache = true)
         } else {
-            PopupTranslationState.Loading
+            PopupTranslationState.Idle
         }
         _activePopup.value = ActivePopup.VocabPopup(list, picked, initialTrans, alarmId, alarmTitle)
-
-        if (picked.meaningBn.isBlank()) {
-            translateCurrentVocabWord(picked)
-        }
     }
 
     fun retryVocabTranslation() {
@@ -666,7 +676,20 @@ class RevisionViewModel(
     }
 
     fun muteAlarmSoundNow() {
+        AlarmRingingService.stop(context)
         audioManager.stopAlarmFeedback()
+    }
+
+    fun triggerTestNotificationNow() {
+        val next = uiState.value.nextTrigger
+        val intent = Intent(context, AlarmReceiver::class.java).apply {
+            putExtra(AlarmScheduler.EXTRA_TRIGGER_TYPE, next?.type ?: "note")
+            putExtra(AlarmScheduler.EXTRA_TRIGGER_TARGET_ID, next?.targetId ?: "")
+            putExtra(AlarmScheduler.EXTRA_TRIGGER_LABEL, next?.labelBn ?: "রিভিশন অ্যালার্ম টেস্ট")
+            putExtra(AlarmScheduler.EXTRA_ALARM_ID, (next as? ScheduledTrigger.CustomAlarmScope)?.alarmId ?: "")
+        }
+        AlarmReceiver().onReceive(context, intent)
+        _bannerMessage.value = "নোটিফিকেশন ও অ্যালার্ম পাঠানো হয়েছে!"
     }
 
     override fun onCleared() {
