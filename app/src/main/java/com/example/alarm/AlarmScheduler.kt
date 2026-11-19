@@ -276,7 +276,13 @@ object AlarmScheduler {
                     chapterMap.containsKey(note.chapterId)
             }
             .sortedWith(
-                compareBy<NoteEntity>({ bookMap[it.bookId]?.sortOrder ?: 0 }, { chapterMap[it.chapterId]?.sortOrder ?: 0 }, { it.updatedAtEpochMs }, { it.id })
+                compareBy<NoteEntity>(
+                    { bookMap[it.bookId]?.sortOrder ?: 0 },
+                    { chapterMap[it.chapterId]?.sortOrder ?: 0 },
+                    { it.sortOrder },
+                    { it.updatedAtEpochMs },
+                    { it.id }
+                )
             )
             .mapNotNull { note ->
                 val b = bookMap[note.bookId] ?: return@mapNotNull null
@@ -397,9 +403,12 @@ object AlarmScheduler {
 
             for ((scopeKey, groupItems) in grouped) {
                 val picked = groupItems.minWithOrNull(
-                    compareByDescending<Triple<NoteEntity, Pair<BookEntity, ChapterEntity>, EffectiveNoteSchedule>> { it.first.starred }
+                    compareBy<Triple<NoteEntity, Pair<BookEntity, ChapterEntity>, EffectiveNoteSchedule>> { it.first.revisionCount }
+                        .thenBy { it.first.sortOrder }
+                        .thenByDescending { it.first.starred }
                         .thenBy { it.first.lastRevisedEpochMs }
-                        .thenBy { it.first.revisionCount }
+                        .thenBy { it.first.updatedAtEpochMs }
+                        .thenBy { it.first.id }
                 ) ?: continue
                 val (note, pair, sched) = picked
                 val (book, chapter) = pair
@@ -408,7 +417,15 @@ object AlarmScheduler {
                     scopeKey.startsWith("chap:") -> maxOf(note.lastTriggeredEpochMs, chapter.lastTriggeredEpochMs)
                     else -> maxOf(note.lastTriggeredEpochMs, book.lastTriggeredEpochMs)
                 }
-                val baseTime = if (scopeLastTrigger > 0L) scopeLastTrigger else groupItems.maxOf { it.first.updatedAtEpochMs }
+                val baseTime = if (scopeLastTrigger > 0L) {
+                    scopeLastTrigger
+                } else {
+                    when {
+                        scopeKey.startsWith("note:") -> note.updatedAtEpochMs
+                        scopeKey.startsWith("chap:") -> maxOf(groupItems.maxOf { it.first.updatedAtEpochMs }, chapter.updatedAtEpochMs)
+                        else -> maxOf(groupItems.maxOf { it.first.updatedAtEpochMs }, chapter.updatedAtEpochMs, book.updatedAtEpochMs)
+                    }
+                }
                 var nextMs = baseTime + sched.intervalMinutes * 60_000L
                 if (stats.snoozedUntilEpochMs > nextMs) {
                     nextMs = stats.snoozedUntilEpochMs

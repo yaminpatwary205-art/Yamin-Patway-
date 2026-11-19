@@ -114,9 +114,13 @@ class RevisionRepository(
     // --- Section A: Books, Chapters, Notes ---
 
     suspend fun updateBook(book: BookEntity) {
+        val now = System.currentTimeMillis()
+        val old = dao.getBookById(book.id)
+        val scheduleChanged = old != null && (old.intervalMinutes != book.intervalMinutes || (!old.enabled && book.enabled))
         val updated = book.copy(
             title = book.title.trim().ifBlank { "Untitled" }.take(120),
-            updatedAtEpochMs = System.currentTimeMillis()
+            lastTriggeredEpochMs = if (scheduleChanged) now else book.lastTriggeredEpochMs,
+            updatedAtEpochMs = now
         )
         dao.upsertBook(updated)
         if (currentUserId != null && isOnline()) {
@@ -145,9 +149,16 @@ class RevisionRepository(
     }
 
     suspend fun updateChapter(chapter: ChapterEntity) {
+        val now = System.currentTimeMillis()
+        val old = dao.getChapterById(chapter.id)
+        val scheduleChanged = old != null && (
+            old.overrideIntervalMinutes != chapter.overrideIntervalMinutes ||
+                (old.overrideEnabled != 1 && chapter.overrideEnabled == 1)
+            )
         val updated = chapter.copy(
             title = chapter.title.trim().ifBlank { "অধ্যায়" }.take(120),
-            updatedAtEpochMs = System.currentTimeMillis()
+            lastTriggeredEpochMs = if (scheduleChanged) now else chapter.lastTriggeredEpochMs,
+            updatedAtEpochMs = now
         )
         dao.upsertChapter(updated)
         if (currentUserId != null && isOnline()) {
@@ -189,12 +200,15 @@ class RevisionRepository(
     suspend fun addNote(bookId: String, chapterId: String, content: String, starred: Boolean = false) {
         val clean = content.trim()
         if (clean.isEmpty()) return
+        val existingInChapter = dao.getAllNotesOnce().filter { it.chapterId == chapterId }
+        val nextOrder = if (existingInChapter.isEmpty()) 0 else (existingInChapter.maxOf { it.sortOrder } + 1)
         val note = NoteEntity(
             id = newId("nt"),
             bookId = bookId,
             chapterId = chapterId,
             content = clean.take(5000),
             starred = starred,
+            sortOrder = maxOf(nextOrder, existingInChapter.size),
             updatedAtEpochMs = System.currentTimeMillis()
         )
         dao.upsertNote(note)
@@ -212,6 +226,8 @@ class RevisionRepository(
             .filter { it.isNotBlank() }
         if (lines.isEmpty()) return
         val now = System.currentTimeMillis()
+        val existingInChapter = dao.getAllNotesOnce().filter { it.chapterId == chapterId }
+        val baseOrder = if (existingInChapter.isEmpty()) 0 else maxOf(existingInChapter.maxOf { it.sortOrder } + 1, existingInChapter.size)
         val entities = lines.mapIndexed { idx, line ->
             NoteEntity(
                 id = newId("nt"),
@@ -219,6 +235,7 @@ class RevisionRepository(
                 chapterId = chapterId,
                 content = line.take(5000),
                 starred = starred,
+                sortOrder = baseOrder + idx,
                 updatedAtEpochMs = now + idx
             )
         }
@@ -230,9 +247,16 @@ class RevisionRepository(
     }
 
     suspend fun updateNote(note: NoteEntity) {
+        val now = System.currentTimeMillis()
+        val old = dao.getNoteById(note.id)
+        val scheduleChanged = old != null && (
+            old.overrideIntervalMinutes != note.overrideIntervalMinutes ||
+                (old.overrideEnabled != 1 && note.overrideEnabled == 1)
+            )
         val updated = note.copy(
             content = note.content.trim().ifBlank { "-" }.take(5000),
-            updatedAtEpochMs = System.currentTimeMillis()
+            lastTriggeredEpochMs = if (scheduleChanged) now else note.lastTriggeredEpochMs,
+            updatedAtEpochMs = now
         )
         dao.upsertNote(updated)
         if (currentUserId != null && isOnline()) {
@@ -241,9 +265,48 @@ class RevisionRepository(
         rescheduleAlarms()
     }
 
+    suspend fun swapNoteOrder(chapterId: String, firstId: String, secondId: String) {
+        val list = dao.getAllNotesOnce()
+            .filter { it.chapterId == chapterId }
+            .sortedWith(compareBy<NoteEntity>({ it.sortOrder }, { it.updatedAtEpochMs }, { it.id }))
+        val idx1 = list.indexOfFirst { it.id == firstId }
+        val idx2 = list.indexOfFirst { it.id == secondId }
+        if (idx1 == -1 || idx2 == -1 || idx1 == idx2) return
+        val mutable = list.toMutableList()
+        val tmp = mutable[idx1]
+        mutable[idx1] = mutable[idx2]
+        mutable[idx2] = tmp
+        val normalized = mutable.mapIndexed { index, item ->
+            item.copy(sortOrder = index)
+        }
+        dao.upsertNotes(normalized)
+        rescheduleAlarms()
+    }
+
+    suspend fun moveNoteToPosition(chapterId: String, noteId: String, targetIndexZeroBased: Int) {
+        val list = dao.getAllNotesOnce()
+            .filter { it.chapterId == chapterId }
+            .sortedWith(compareBy<NoteEntity>({ it.sortOrder }, { it.updatedAtEpochMs }, { it.id }))
+            .toMutableList()
+        val currentIdx = list.indexOfFirst { it.id == noteId }
+        if (currentIdx == -1) return
+        val clampedTarget = targetIndexZeroBased.coerceIn(0, (list.size - 1).coerceAtLeast(0))
+        if (currentIdx == clampedTarget) return
+        val item = list.removeAt(currentIdx)
+        list.add(clampedTarget, item)
+        val normalized = list.mapIndexed { index, note ->
+            note.copy(sortOrder = index)
+        }
+        dao.upsertNotes(normalized)
+        rescheduleAlarms()
+    }
+
     suspend fun duplicateNote(note: NoteEntity) {
+        val existingInChapter = dao.getAllNotesOnce().filter { it.chapterId == note.chapterId }
+        val nextOrder = if (existingInChapter.isEmpty()) 0 else maxOf(existingInChapter.maxOf { it.sortOrder } + 1, existingInChapter.size)
         val copy = note.copy(
             id = newId("nt"),
+            sortOrder = nextOrder,
             revisionCount = 0,
             lastRevisedEpochMs = 0L,
             lastRevisedDay = "",
@@ -258,9 +321,12 @@ class RevisionRepository(
     }
 
     suspend fun moveNoteToChapter(note: NoteEntity, targetChapter: ChapterEntity) {
+        val targetNotes = dao.getAllNotesOnce().filter { it.chapterId == targetChapter.id }
+        val nextOrder = if (targetNotes.isEmpty()) 0 else maxOf(targetNotes.maxOf { it.sortOrder } + 1, targetNotes.size)
         val updated = note.copy(
             bookId = targetChapter.bookId,
             chapterId = targetChapter.id,
+            sortOrder = nextOrder,
             updatedAtEpochMs = System.currentTimeMillis()
         )
         dao.upsertNote(updated)
@@ -342,7 +408,9 @@ class RevisionRepository(
     ) {
         val lines = splitParagraphIntoLines(rawText)
         if (lines.isEmpty()) return
+        val now = System.currentTimeMillis()
         val old = if (existingId != null) dao.getParagraphById(existingId) else null
+        val scheduleChanged = old != null && (old.intervalMinutes != intervalMinutes || (!old.enabled && enabled))
         val entity = ParagraphFileEntity(
             id = existingId ?: newId("pr"),
             title = title.trim().ifBlank { "Untitled Paragraph" }.take(160),
@@ -352,8 +420,8 @@ class RevisionRepository(
             enabled = enabled,
             intervalMinutes = intervalMinutes.coerceIn(1, 1440),
             memoryMode = memoryMode,
-            lastTriggeredEpochMs = old?.lastTriggeredEpochMs ?: 0L,
-            updatedAtEpochMs = System.currentTimeMillis()
+            lastTriggeredEpochMs = if (scheduleChanged) now else (old?.lastTriggeredEpochMs ?: 0L),
+            updatedAtEpochMs = now
         )
         dao.upsertParagraph(entity)
         if (currentUserId != null && isOnline()) {
@@ -363,7 +431,13 @@ class RevisionRepository(
     }
 
     suspend fun updateParagraph(paragraph: ParagraphFileEntity) {
-        val updated = paragraph.copy(updatedAtEpochMs = System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val old = dao.getParagraphById(paragraph.id)
+        val scheduleChanged = old != null && (old.intervalMinutes != paragraph.intervalMinutes || (!old.enabled && paragraph.enabled))
+        val updated = paragraph.copy(
+            lastTriggeredEpochMs = if (scheduleChanged) now else paragraph.lastTriggeredEpochMs,
+            updatedAtEpochMs = now
+        )
         dao.upsertParagraph(updated)
         if (currentUserId != null && isOnline()) {
             firestoreSync.pushDoc("paragraphs", updated.id, updated.toFsMap())
@@ -419,7 +493,13 @@ class RevisionRepository(
     }
 
     suspend fun updateVocabList(list: VocabListEntity) {
-        val updated = list.copy(updatedAtEpochMs = System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val old = dao.getVocabListById(list.id)
+        val scheduleChanged = old != null && (old.intervalMinutes != list.intervalMinutes || (!old.enabled && list.enabled))
+        val updated = list.copy(
+            lastTriggeredEpochMs = if (scheduleChanged) now else list.lastTriggeredEpochMs,
+            updatedAtEpochMs = now
+        )
         dao.upsertVocabList(updated)
         if (currentUserId != null && isOnline()) {
             firestoreSync.pushDoc("vocab_lists", updated.id, updated.toFsMap())
@@ -742,7 +822,7 @@ class RevisionRepository(
             dao.getAllNotesOnce().forEach { n ->
                 put(JSONObject().apply {
                     put("id", n.id); put("bookId", n.bookId); put("chapterId", n.chapterId)
-                    put("content", n.content); put("starred", n.starred)
+                    put("content", n.content); put("starred", n.starred); put("sortOrder", n.sortOrder)
                     put("overrideEnabled", n.overrideEnabled); put("overrideIntervalMinutes", n.overrideIntervalMinutes)
                     put("revisionCount", n.revisionCount); put("lastRevisedEpochMs", n.lastRevisedEpochMs)
                 })
@@ -863,6 +943,7 @@ class RevisionRepository(
                         chapterId = o.getString("chapterId"),
                         content = o.getString("content"),
                         starred = o.optBoolean("starred", false),
+                        sortOrder = o.optInt("sortOrder", i),
                         overrideEnabled = o.optInt("overrideEnabled", -1),
                         overrideIntervalMinutes = o.optInt("overrideIntervalMinutes", 0),
                         revisionCount = o.optInt("revisionCount", 0),

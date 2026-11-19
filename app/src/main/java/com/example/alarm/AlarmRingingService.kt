@@ -264,8 +264,19 @@ class AlarmActionReceiver : BroadcastReceiver() {
                             }
                         } else {
                             when (type) {
-                                "note" -> dao.getNoteById(targetId)?.let {
-                                    dao.upsertNote(it.copy(lastTriggeredEpochMs = now, updatedAtEpochMs = now))
+                                "note" -> dao.getNoteById(targetId)?.let { note ->
+                                    dao.upsertNote(note.copy(lastTriggeredEpochMs = now, updatedAtEpochMs = now))
+                                    val noteHasOverride = note.overrideEnabled != -1 || note.overrideIntervalMinutes > 0
+                                    val chap = dao.getChapterById(note.chapterId)
+                                    val chapHasOverride = chap != null && (chap.overrideEnabled != -1 || chap.overrideIntervalMinutes > 0)
+                                    if (!noteHasOverride && chap != null) {
+                                        dao.upsertChapter(chap.copy(lastTriggeredEpochMs = now, updatedAtEpochMs = now))
+                                    }
+                                    if (!noteHasOverride && !chapHasOverride) {
+                                        dao.getBookById(note.bookId)?.let { book ->
+                                            dao.upsertBook(book.copy(lastTriggeredEpochMs = now, updatedAtEpochMs = now))
+                                        }
+                                    }
                                 }
                                 "paragraph" -> dao.getParagraphById(targetId)?.let {
                                     dao.upsertParagraph(it.copy(lastTriggeredEpochMs = now, updatedAtEpochMs = now))

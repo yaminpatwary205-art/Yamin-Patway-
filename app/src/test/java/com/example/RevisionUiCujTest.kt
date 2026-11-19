@@ -15,6 +15,7 @@ import com.example.ui.RevisionUiState
 import com.example.ui.RevisionViewModel
 import com.example.ui.components.RevisionPopupOverlay
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.ChapterDetailScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.RevisionAlarmTheme
 import com.google.firebase.FirebaseApp
@@ -41,6 +42,7 @@ class RevisionUiCujTest {
     private lateinit var db: AppDatabase
     private lateinit var dao: AppDao
     private lateinit var repo: RevisionRepository
+    private lateinit var viewModelStore: androidx.lifecycle.ViewModelStore
     private lateinit var viewModel: RevisionViewModel
 
     @Before
@@ -60,11 +62,20 @@ class RevisionUiCujTest {
         )
         repo = RevisionRepository(context, dao, fsSync)
         runBlocking { repo.ensureSeeded() }
-        viewModel = RevisionViewModel(context, repo)
+        viewModelStore = androidx.lifecycle.ViewModelStore()
+        val factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                return RevisionViewModel(context, repo) as T
+            }
+        }
+        viewModel = androidx.lifecycle.ViewModelProvider(viewModelStore, factory)[RevisionViewModel::class.java]
     }
 
     @After
     fun tearDown() {
+        viewModelStore.clear()
+        runBlocking { kotlinx.coroutines.delay(250) }
         db.close()
     }
 
@@ -406,6 +417,51 @@ class RevisionUiCujTest {
         }
         composeRule.onNodeWithText("শেষ লাইন (2/2)").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("সম্পন্ন • আবার ১ম লাইন").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `chapter detail screen displays note serial numbers, allows reordering and setting 1-min timer`() {
+        val book = DefaultBooksSeed.books[0]
+        val chapter = ChapterEntity("ch_ui_1", book.id, "অধ্যায় ১", 0)
+        runBlocking {
+            dao.upsertChapter(chapter)
+            repo.addMultipleNotes(book.id, chapter.id, "প্রথম নোট\nদ্বিতীয় নোট\nতৃতীয় নোট")
+        }
+        val initialNotes = runBlocking { dao.getAllNotesOnce() }
+        val thirdNote = initialNotes.last()
+
+        composeRule.setContent {
+            val state by viewModel.uiState.collectAsState()
+            RevisionAlarmTheme {
+                ChapterDetailScreen(
+                    book = book,
+                    chapter = chapter,
+                    allChaptersInBook = listOf(chapter),
+                    notes = state.notes.filter { it.chapterId == chapter.id },
+                    repository = repo,
+                    onBack = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("#1").assertIsDisplayed()
+        composeRule.onNodeWithText("#3").assertIsDisplayed()
+
+        // Open schedule & order dialog on 3rd note via its #3 badge, move to #1 and set 1-minute interval
+        composeRule.onNodeWithTag("note_order_badge_${thirdNote.id}").performScrollTo().performClick()
+        composeRule.waitUntil(timeoutMillis = 5000) {
+            composeRule.onAllNodesWithTag("note_move_first_button").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("note_move_first_button").performScrollTo().performClick()
+        composeRule.onNodeWithTag("note_interval_chip_1").performScrollTo().performClick()
+        composeRule.onNodeWithTag("save_note_schedule_button").performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5000) {
+            runBlocking {
+                val updated = dao.getNoteById(thirdNote.id)
+                updated != null && updated.sortOrder == 0 && updated.overrideIntervalMinutes == 1
+            }
+        }
     }
 
     private fun contrastRatio(fg: androidx.compose.ui.graphics.Color, bg: androidx.compose.ui.graphics.Color): Double {

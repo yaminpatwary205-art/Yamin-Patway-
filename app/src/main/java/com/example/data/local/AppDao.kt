@@ -47,13 +47,13 @@ interface AppDao {
     suspend fun deleteChapterById(id: String)
 
     // Notes
-    @Query("SELECT * FROM notes ORDER BY updatedAtEpochMs DESC")
+    @Query("SELECT * FROM notes ORDER BY sortOrder ASC, updatedAtEpochMs ASC")
     fun observeAllNotes(): Flow<List<NoteEntity>>
 
-    @Query("SELECT * FROM notes WHERE chapterId = :chapterId ORDER BY starred DESC, updatedAtEpochMs DESC")
+    @Query("SELECT * FROM notes WHERE chapterId = :chapterId ORDER BY sortOrder ASC, updatedAtEpochMs ASC")
     fun observeNotesForChapter(chapterId: String): Flow<List<NoteEntity>>
 
-    @Query("SELECT * FROM notes")
+    @Query("SELECT * FROM notes ORDER BY sortOrder ASC, updatedAtEpochMs ASC")
     suspend fun getAllNotesOnce(): List<NoteEntity>
 
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")

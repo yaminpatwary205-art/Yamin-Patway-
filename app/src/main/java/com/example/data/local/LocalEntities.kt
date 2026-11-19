@@ -34,7 +34,7 @@ data class BookEntity(
     val sortOrder: Int,
     val enabled: Boolean = true,
     val intervalMinutes: Int = 30,
-    val useActiveHours: Boolean = true,
+    val useActiveHours: Boolean = false,
     val activeStartMinutes: Int = 8 * 60,
     val activeEndMinutes: Int = 22 * 60,
     val examDateEpochMs: Long = 0L,
@@ -64,6 +64,7 @@ data class NoteEntity(
     val chapterId: String,
     val content: String,
     val starred: Boolean = false,
+    val sortOrder: Int = 0,
     val overrideEnabled: Int = -1, // -1 inherit, 0 off, 1 on
     val overrideIntervalMinutes: Int = 0, // 0 inherit
     val revisionCount: Int = 0,

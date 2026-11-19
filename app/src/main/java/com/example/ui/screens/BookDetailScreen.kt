@@ -137,7 +137,7 @@ fun BookDetailScreen(
                                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                listOf(5, 15, 30, 60).forEach { mins ->
+                                listOf(1, 5, 15, 30, 60).forEach { mins ->
                                     FilterChip(
                                         selected = book.intervalMinutes == mins,
                                         onClick = {
@@ -147,11 +147,11 @@ fun BookDetailScreen(
                                     )
                                 }
                                 FilterChip(
-                                    selected = book.intervalMinutes !in listOf(5, 15, 30, 60),
+                                    selected = book.intervalMinutes !in listOf(1, 5, 15, 30, 60),
                                     onClick = { showEditBook = true },
                                     label = {
                                         Text(
-                                            if (book.intervalMinutes !in listOf(5, 15, 30, 60)) "${book.intervalMinutes} মি." else "কাস্টম"
+                                            if (book.intervalMinutes !in listOf(1, 5, 15, 30, 60)) "${book.intervalMinutes} মি." else "কাস্টম"
                                         )
                                     }
                                 )
@@ -410,6 +410,18 @@ fun BookDetailScreen(
                         FilterChip(selected = overrideEnabled == -1, onClick = { overrideEnabled = -1 }, label = { Text("বইয়ের মতো") })
                         FilterChip(selected = overrideEnabled == 1, onClick = { overrideEnabled = 1 }, label = { Text("চালু") })
                         FilterChip(selected = overrideEnabled == 0, onClick = { overrideEnabled = 0 }, label = { Text("বন্ধ") })
+                    }
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(1, 5, 10, 15, 30).forEach { mins ->
+                            FilterChip(
+                                selected = overrideInterval == mins.toString(),
+                                onClick = { overrideInterval = mins.toString() },
+                                label = { Text("$mins মি.") }
+                            )
+                        }
                     }
                     OutlinedTextField(
                         value = overrideInterval,

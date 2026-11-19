@@ -184,7 +184,7 @@ fun AlarmEditorDialog(
                                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        listOf(5, 10, 15, 30, 60).forEach { mins ->
+                                        listOf(1, 5, 10, 15, 30, 60).forEach { mins ->
                                             FilterChip(
                                                 selected = intervalText == mins.toString(),
                                                 onClick = { intervalText = mins.toString() },
@@ -450,7 +450,10 @@ fun AlarmEditorDialog(
                                                     }
 
                                                     if (isChExpanded) {
-                                                        chNotes.forEach { note ->
+                                                        val sortedChNotes = chNotes.sortedWith(
+                                                            compareBy<NoteEntity>({ it.sortOrder }, { it.updatedAtEpochMs }, { it.id })
+                                                        )
+                                                        sortedChNotes.forEachIndexed { idx, note ->
                                                             val isNoteChecked = isChChecked || note.id in selectedNoteIds
                                                             Row(
                                                                 verticalAlignment = Alignment.CenterVertically,
@@ -479,7 +482,7 @@ fun AlarmEditorDialog(
                                                                     modifier = Modifier.testTag("alarm_select_note_${note.id}")
                                                                 )
                                                                 Text(
-                                                                    text = note.content,
+                                                                    text = "#${idx + 1}. ${note.content}",
                                                                     style = MaterialTheme.typography.bodySmall,
                                                                     maxLines = 2,
                                                                     overflow = TextOverflow.Ellipsis,

@@ -555,4 +555,97 @@ class RevisionAlarmLogicTest {
         context.deleteDatabase("migration_test_check.db")
         context.deleteDatabase("migration_verify.db")
     }
+
+    @Test
+    fun `one-minute timer schedules exactly 60 seconds ahead and 50 notes follow user sortOrder`() = runBlocking {
+        repo.ensureSeeded()
+        val book = DefaultBooksSeed.books[0]
+        assertFalse("Default books should run 24h unless night pause enabled", book.useActiveHours)
+
+        repo.addChapter(book.id, "বড় অধ্যায়")
+        val chapter = dao.getAllChaptersOnce().single()
+
+        // Simulate adding 50 notes in bulk
+        val fiftyLines = (1..50).joinToString("\n") { "নোট নম্বর $it" }
+        repo.addMultipleNotes(book.id, chapter.id, fiftyLines, starred = false)
+
+        val notes = dao.getAllNotesOnce()
+        assertEquals(50, notes.size)
+        assertEquals((0..49).toList(), notes.map { it.sortOrder })
+        assertEquals("নোট নম্বর 1", notes.first().content)
+        assertEquals("নোট নম্বর 50", notes.last().content)
+
+        // User changes chapter timer to 1 minute after notes were added
+        val beforeUpdateMs = System.currentTimeMillis()
+        repo.updateChapter(chapter.copy(overrideEnabled = 1, overrideIntervalMinutes = 1))
+        val afterUpdateMs = System.currentTimeMillis()
+
+        val firstTrigger = AlarmScheduler.computeNextTrigger(
+            nowMs = afterUpdateMs,
+            stats = UserStatsEntity(),
+            books = dao.getAllBooksOnce(),
+            chapters = dao.getAllChaptersOnce(),
+            notes = dao.getAllNotesOnce(),
+            paragraphs = emptyList(),
+            vocabLists = emptyList(),
+            vocabWords = emptyList()
+        )!!
+
+        // Must pick Note #1 and schedule 60 seconds after the timer was set (not overdue immediately!)
+        assertEquals(notes.first().id, firstTrigger.targetId)
+        assertTrue(
+            "1-min timer should schedule ~60s ahead",
+            firstTrigger.nextTriggerEpochMs in (beforeUpdateMs + 59_000L)..(afterUpdateMs + 61_000L)
+        )
+
+        // Move Note #50 to position #1 (index 0) and verify it now comes FIRST
+        val note50 = notes.last()
+        repo.moveNoteToPosition(chapter.id, note50.id, 0)
+        val reordered = dao.getAllNotesOnce()
+        assertEquals(note50.id, reordered.first().id)
+        assertEquals(0, reordered.first().sortOrder)
+
+        val afterReorderTrigger = AlarmScheduler.computeNextTrigger(
+            nowMs = System.currentTimeMillis(),
+            stats = UserStatsEntity(),
+            books = dao.getAllBooksOnce(),
+            chapters = dao.getAllChaptersOnce(),
+            notes = reordered,
+            paragraphs = emptyList(),
+            vocabLists = emptyList(),
+            vocabWords = emptyList()
+        )!!
+        assertEquals(note50.id, afterReorderTrigger.targetId)
+
+        // Set Note #25 to its own independent 2-minute interval while chapter stays 1 minute
+        val note25 = reordered.first { it.content == "নোট নম্বর 25" }
+        repo.updateNote(note25.copy(overrideEnabled = 1, overrideIntervalMinutes = 2))
+        val updated25 = dao.getNoteById(note25.id)!!
+        assertTrue(updated25.lastTriggeredEpochMs > 0L)
+    }
+
+    @Test
+    fun `migration 2 to 3 adds sortOrder column to notes table`() {
+        val supportDb = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name("migration_2_3_verify.db")
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(3) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE notes (id TEXT NOT NULL PRIMARY KEY, bookId TEXT NOT NULL, chapterId TEXT NOT NULL, content TEXT NOT NULL, starred INTEGER NOT NULL, overrideEnabled INTEGER NOT NULL, overrideIntervalMinutes INTEGER NOT NULL, revisionCount INTEGER NOT NULL, lastRevisedEpochMs INTEGER NOT NULL, lastRevisedDay TEXT NOT NULL, lastTriggeredEpochMs INTEGER NOT NULL, updatedAtEpochMs INTEGER NOT NULL)"
+                    )
+                    AppDatabase.MIGRATION_2_3.migrate(db)
+                }
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+            })
+            .build()
+        val conn = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(supportDb).writableDatabase
+        conn.execSQL("INSERT INTO notes (id,bookId,chapterId,content,starred,overrideEnabled,overrideIntervalMinutes,revisionCount,lastRevisedEpochMs,lastRevisedDay,lastTriggeredEpochMs,updatedAtEpochMs) VALUES ('n1','b1','c1','Hello',0,-1,0,0,0,'',0,100)")
+        val cursor = conn.query("SELECT sortOrder FROM notes WHERE id='n1'")
+        assertTrue(cursor.moveToFirst())
+        assertEquals(0, cursor.getInt(0))
+        cursor.close()
+        conn.close()
+        context.deleteDatabase("migration_2_3_verify.db")
+    }
 }
+

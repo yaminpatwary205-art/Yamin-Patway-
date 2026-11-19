@@ -201,6 +201,7 @@ class FirestoreSyncRepository(
             )
 
             // 5. Notes
+            val localNoteOrderById = dao.getAllNotesOnce().associate { it.id to it.sortOrder }
             mergeCollection(
                 uid = uid,
                 collection = "notes",
@@ -220,6 +221,7 @@ class FirestoreSyncRepository(
                             chapterId = r.chapterId,
                             content = r.content,
                             starred = r.starred,
+                            sortOrder = localNoteOrderById[r.id] ?: 0,
                             overrideEnabled = r.overrideEnabled.toInt(),
                             overrideIntervalMinutes = r.overrideIntervalMinutes.toInt(),
                             revisionCount = r.revisionCount.toInt(),
