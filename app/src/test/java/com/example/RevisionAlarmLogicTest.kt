@@ -647,5 +647,65 @@ class RevisionAlarmLogicTest {
         conn.close()
         context.deleteDatabase("migration_2_3_verify.db")
     }
+
+    @Test
+    fun `migration 3 to 4 adds imagePath column to notes table`() {
+        val supportDb = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name("migration_3_4_verify.db")
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(4) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE notes (id TEXT NOT NULL PRIMARY KEY, bookId TEXT NOT NULL, chapterId TEXT NOT NULL, content TEXT NOT NULL, starred INTEGER NOT NULL, sortOrder INTEGER NOT NULL DEFAULT 0, overrideEnabled INTEGER NOT NULL, overrideIntervalMinutes INTEGER NOT NULL, revisionCount INTEGER NOT NULL, lastRevisedEpochMs INTEGER NOT NULL, lastRevisedDay TEXT NOT NULL, lastTriggeredEpochMs INTEGER NOT NULL, updatedAtEpochMs INTEGER NOT NULL)"
+                    )
+                    AppDatabase.MIGRATION_3_4.migrate(db)
+                }
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+            })
+            .build()
+        val conn = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(supportDb).writableDatabase
+        conn.execSQL("INSERT INTO notes (id,bookId,chapterId,content,starred,sortOrder,overrideEnabled,overrideIntervalMinutes,revisionCount,lastRevisedEpochMs,lastRevisedDay,lastTriggeredEpochMs,updatedAtEpochMs) VALUES ('n1','b1','c1','Diagram',0,0,-1,0,0,0,'',0,100)")
+        val cursor = conn.query("SELECT imagePath FROM notes WHERE id='n1'")
+        assertTrue(cursor.moveToFirst())
+        assertEquals("", cursor.getString(0))
+        cursor.close()
+        conn.close()
+        context.deleteDatabase("migration_3_4_verify.db")
+    }
+
+    @Test
+    fun `note image files copy locally, reorder to any position, and clean up on delete`() = runBlocking {
+        repo.ensureSeeded()
+        val book = DefaultBooksSeed.books[0]
+        repo.addChapter(book.id, "চিত্র অধ্যায়")
+        val chapter = dao.getAllChaptersOnce().single()
+
+        // Create a temporary PNG bitmap and save via URI
+        val tempInput = java.io.File(context.cacheDir, "sample_diagram.png")
+        val bmp = android.graphics.Bitmap.createBitmap(120, 80, android.graphics.Bitmap.Config.ARGB_8888)
+        java.io.FileOutputStream(tempInput).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        bmp.recycle()
+
+        val savedPath = repo.savePickedNoteImage(android.net.Uri.fromFile(tempInput))
+        assertNotNull(savedPath)
+        assertTrue(java.io.File(savedPath!!).exists())
+
+        repo.addNote(book.id, chapter.id, "প্রথম লেখা")
+        repo.addNote(book.id, chapter.id, "", starred = true, imagePath = savedPath)
+
+        val notes = dao.getAllNotesOnce()
+        assertEquals(2, notes.size)
+        val imgNote = notes.last()
+        assertEquals("চিত্র নোট", imgNote.content)
+        assertEquals(savedPath, imgNote.imagePath)
+
+        // Move image note to #1 (dragged to top)
+        repo.moveNoteToPosition(chapter.id, imgNote.id, 0)
+        assertEquals(imgNote.id, dao.getAllNotesOnce().first().id)
+
+        // Delete image note cleans up local image file
+        repo.deleteNote(imgNote.id)
+        assertFalse(java.io.File(savedPath).exists())
+        assertTrue(tempInput.delete())
+    }
 }
 

@@ -63,6 +63,7 @@ data class NoteEntity(
     val bookId: String,
     val chapterId: String,
     val content: String,
+    val imagePath: String = "",
     val starred: Boolean = false,
     val sortOrder: Int = 0,
     val overrideEnabled: Int = -1, // -1 inherit, 0 off, 1 on

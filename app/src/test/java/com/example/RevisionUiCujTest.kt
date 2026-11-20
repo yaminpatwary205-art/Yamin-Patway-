@@ -464,6 +464,87 @@ class RevisionUiCujTest {
         }
     }
 
+    @Test
+    fun `chapter detail displays note image, floating draggable diagram overlay, and fullscreen viewer`() {
+        val book = DefaultBooksSeed.books[0]
+        val chapter = ChapterEntity("ch_img_1", book.id, "চিত্র অধ্যায়", 0)
+        val imgFile = java.io.File(context.filesDir, "test_diagram.png").apply {
+            val bmp = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+            java.io.FileOutputStream(this).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            bmp.recycle()
+        }
+        runBlocking {
+            dao.upsertChapter(chapter)
+            repo.addNote(book.id, chapter.id, "হৃৎপিণ্ডের চিত্র", starred = true, imagePath = imgFile.absolutePath)
+        }
+        val noteWithImg = runBlocking { dao.getAllNotesOnce().single() }
+
+        composeRule.setContent {
+            val state by viewModel.uiState.collectAsState()
+            RevisionAlarmTheme {
+                ChapterDetailScreen(
+                    book = book,
+                    chapter = chapter,
+                    allChaptersInBook = listOf(chapter),
+                    notes = state.notes.filter { it.chapterId == chapter.id },
+                    repository = repo,
+                    onBack = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("add_image_note_fab").assertIsDisplayed()
+        composeRule.waitUntil(timeoutMillis = 5000) {
+            composeRule.onAllNodesWithTag("note_drag_handle_${noteWithImg.id}").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("note_drag_handle_${noteWithImg.id}").assertIsDisplayed()
+        composeRule.onNodeWithTag("note_image_preview_${noteWithImg.id}").performScrollTo().assertIsDisplayed()
+
+        // Pin floating draggable image anywhere on screen
+        composeRule.onNodeWithTag("pin_drag_image_${noteWithImg.id}").performScrollTo().performClick()
+        composeRule.onNodeWithTag("floating_image_overlay").assertIsDisplayed()
+        composeRule.onNodeWithTag("floating_image_resize_button").performClick()
+        composeRule.onNodeWithTag("close_floating_image_button").performClick()
+        composeRule.onAllNodesWithTag("floating_image_overlay").assertCountEquals(0)
+
+        // Open fullscreen zoom viewer
+        composeRule.onNodeWithTag("note_image_preview_${noteWithImg.id}").performScrollTo().performClick()
+        composeRule.onNodeWithTag("note_image_viewer_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("close_image_viewer_button").performClick()
+        composeRule.onAllNodesWithTag("note_image_viewer_dialog").assertCountEquals(0)
+
+        imgFile.delete()
+    }
+
+    @Test
+    fun `note popup overlay renders attached diagram image`() {
+        val imgFile = java.io.File(context.filesDir, "popup_diagram.png").apply {
+            val bmp = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+            java.io.FileOutputStream(this).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            bmp.recycle()
+        }
+        val book = DefaultBooksSeed.books[0]
+        val chapter = ChapterEntity("ch_pop", book.id, "জীববিজ্ঞান", 0)
+        val note = NoteEntity("n_img_pop", book.id, chapter.id, "কোষ বিভাজনের চিত্র", imagePath = imgFile.absolutePath)
+        val popup = ActivePopup.NotePopup(book, chapter, note)
+
+        composeRule.setContent {
+            RevisionAlarmTheme {
+                RevisionPopupOverlay(
+                    popup = popup,
+                    defaultSnoozeMinutes = 5,
+                    viewModel = viewModel,
+                    onToggleNoteStar = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("popup_note_image_preview").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("কোষ বিভাজনের চিত্র").performScrollTo().assertIsDisplayed()
+
+        imgFile.delete()
+    }
+
     private fun contrastRatio(fg: androidx.compose.ui.graphics.Color, bg: androidx.compose.ui.graphics.Color): Double {
         fun lum(c: androidx.compose.ui.graphics.Color): Double {
             fun ch(v: Float): Double {

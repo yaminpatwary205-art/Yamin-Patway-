@@ -201,11 +201,13 @@ class FirestoreSyncRepository(
             )
 
             // 5. Notes
-            val localNoteOrderById = dao.getAllNotesOnce().associate { it.id to it.sortOrder }
+            val localNotes = dao.getAllNotesOnce()
+            val localNoteOrderById = localNotes.associate { it.id to it.sortOrder }
+            val localNoteImageById = localNotes.associate { it.id to it.imagePath }
             mergeCollection(
                 uid = uid,
                 collection = "notes",
-                localItems = dao.getAllNotesOnce(),
+                localItems = localNotes,
                 localId = { it.id },
                 localUpdated = { it.updatedAtEpochMs },
                 toFsFields = { it.toFsMap() },
@@ -220,6 +222,7 @@ class FirestoreSyncRepository(
                             bookId = r.bookId,
                             chapterId = r.chapterId,
                             content = r.content,
+                            imagePath = localNoteImageById[r.id].orEmpty(),
                             starred = r.starred,
                             sortOrder = localNoteOrderById[r.id] ?: 0,
                             overrideEnabled = r.overrideEnabled.toInt(),

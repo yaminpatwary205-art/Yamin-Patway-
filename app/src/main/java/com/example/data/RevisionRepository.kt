@@ -1,17 +1,24 @@
 package com.example.data
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import com.example.alarm.AlarmScheduler
 import com.example.data.local.*
 import com.example.data.remote.*
 import com.example.translation.TranslationOutcome
 import com.example.translation.TranslationService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -178,11 +185,63 @@ class RevisionRepository(
         }
     }
 
+    private fun noteImagesDir(): File {
+        val dir = File(context.filesDir, "note_images")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    suspend fun savePickedNoteImage(uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@withContext null
+            if (bytes.isEmpty()) return@withContext null
+            val outFile = File(noteImagesDir(), "${newId("img")}.jpg")
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                var sampleSize = 1
+                while (bounds.outWidth / sampleSize > 2048 || bounds.outHeight / sampleSize > 2048) {
+                    sampleSize *= 2
+                }
+                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)
+                if (bmp != null) {
+                    FileOutputStream(outFile).use { fos ->
+                        bmp.compress(Bitmap.CompressFormat.JPEG, 88, fos)
+                    }
+                    bmp.recycle()
+                    return@withContext outFile.absolutePath
+                }
+            }
+            // Fallback raw copy if platform decoder isn't available for this format
+            outFile.writeBytes(bytes)
+            outFile.absolutePath
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun deleteUnusedLocalImage(imagePath: String, remainingNotes: List<NoteEntity>? = null) {
+        if (imagePath.isBlank()) return
+        try {
+            val file = File(imagePath)
+            val imagesDir = noteImagesDir().canonicalPath
+            if (!file.canonicalPath.startsWith(imagesDir)) return
+            val stillUsed = remainingNotes?.any { it.imagePath == imagePath } == true
+            if (!stillUsed && file.exists()) {
+                file.delete()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     suspend fun deleteChapter(chapterId: String) {
         val notes = dao.getAllNotesOnce().filter { it.chapterId == chapterId }
         dao.deleteNotesForChapter(chapterId)
         dao.deleteChapterById(chapterId)
+        val remaining = dao.getAllNotesOnce()
         for (note in notes) {
+            deleteUnusedLocalImage(note.imagePath, remaining)
             if (currentUserId != null && isOnline()) {
                 firestoreSync.deleteDocOrQueue("notes", note.id)
             } else if (currentUserId != null) {
@@ -197,16 +256,25 @@ class RevisionRepository(
         rescheduleAlarms()
     }
 
-    suspend fun addNote(bookId: String, chapterId: String, content: String, starred: Boolean = false) {
+    suspend fun addNote(
+        bookId: String,
+        chapterId: String,
+        content: String,
+        starred: Boolean = false,
+        imagePath: String = ""
+    ) {
         val clean = content.trim()
-        if (clean.isEmpty()) return
+        val cleanImage = imagePath.trim()
+        if (clean.isEmpty() && cleanImage.isEmpty()) return
+        val finalContent = clean.ifEmpty { "চিত্র নোট" }
         val existingInChapter = dao.getAllNotesOnce().filter { it.chapterId == chapterId }
         val nextOrder = if (existingInChapter.isEmpty()) 0 else (existingInChapter.maxOf { it.sortOrder } + 1)
         val note = NoteEntity(
             id = newId("nt"),
             bookId = bookId,
             chapterId = chapterId,
-            content = clean.take(5000),
+            content = finalContent.take(5000),
+            imagePath = cleanImage,
             starred = starred,
             sortOrder = maxOf(nextOrder, existingInChapter.size),
             updatedAtEpochMs = System.currentTimeMillis()
@@ -253,12 +321,18 @@ class RevisionRepository(
             old.overrideIntervalMinutes != note.overrideIntervalMinutes ||
                 (old.overrideEnabled != 1 && note.overrideEnabled == 1)
             )
+        val cleanImage = note.imagePath.trim()
+        val fallbackContent = if (cleanImage.isNotBlank()) "চিত্র নোট" else "-"
         val updated = note.copy(
-            content = note.content.trim().ifBlank { "-" }.take(5000),
+            content = note.content.trim().ifBlank { fallbackContent }.take(5000),
+            imagePath = cleanImage,
             lastTriggeredEpochMs = if (scheduleChanged) now else note.lastTriggeredEpochMs,
             updatedAtEpochMs = now
         )
         dao.upsertNote(updated)
+        if (old != null && old.imagePath.isNotBlank() && old.imagePath != cleanImage) {
+            deleteUnusedLocalImage(old.imagePath, dao.getAllNotesOnce())
+        }
         if (currentUserId != null && isOnline()) {
             firestoreSync.pushDoc("notes", updated.id, updated.toFsMap())
         }
@@ -304,8 +378,17 @@ class RevisionRepository(
     suspend fun duplicateNote(note: NoteEntity) {
         val existingInChapter = dao.getAllNotesOnce().filter { it.chapterId == note.chapterId }
         val nextOrder = if (existingInChapter.isEmpty()) 0 else maxOf(existingInChapter.maxOf { it.sortOrder } + 1, existingInChapter.size)
+        val copiedImagePath = if (note.imagePath.isNotBlank()) {
+            val src = File(note.imagePath)
+            if (src.exists()) {
+                val dest = File(noteImagesDir(), "${newId("img")}.jpg")
+                src.copyTo(dest, overwrite = true)
+                dest.absolutePath
+            } else ""
+        } else ""
         val copy = note.copy(
             id = newId("nt"),
+            imagePath = copiedImagePath,
             sortOrder = nextOrder,
             revisionCount = 0,
             lastRevisedEpochMs = 0L,
@@ -337,7 +420,11 @@ class RevisionRepository(
     }
 
     suspend fun deleteNote(noteId: String) {
+        val existing = dao.getNoteById(noteId)
         dao.deleteNoteById(noteId)
+        if (existing != null && existing.imagePath.isNotBlank()) {
+            deleteUnusedLocalImage(existing.imagePath, dao.getAllNotesOnce())
+        }
         if (currentUserId != null && isOnline()) {
             firestoreSync.deleteDocOrQueue("notes", noteId)
         } else if (currentUserId != null) {
@@ -822,7 +909,7 @@ class RevisionRepository(
             dao.getAllNotesOnce().forEach { n ->
                 put(JSONObject().apply {
                     put("id", n.id); put("bookId", n.bookId); put("chapterId", n.chapterId)
-                    put("content", n.content); put("starred", n.starred); put("sortOrder", n.sortOrder)
+                    put("content", n.content); put("imagePath", n.imagePath); put("starred", n.starred); put("sortOrder", n.sortOrder)
                     put("overrideEnabled", n.overrideEnabled); put("overrideIntervalMinutes", n.overrideIntervalMinutes)
                     put("revisionCount", n.revisionCount); put("lastRevisedEpochMs", n.lastRevisedEpochMs)
                 })
@@ -942,6 +1029,7 @@ class RevisionRepository(
                         bookId = o.getString("bookId"),
                         chapterId = o.getString("chapterId"),
                         content = o.getString("content"),
+                        imagePath = o.optString("imagePath", ""),
                         starred = o.optBoolean("starred", false),
                         sortOrder = o.optInt("sortOrder", i),
                         overrideEnabled = o.optInt("overrideEnabled", -1),

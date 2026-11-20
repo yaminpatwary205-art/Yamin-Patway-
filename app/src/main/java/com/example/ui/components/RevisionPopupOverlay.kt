@@ -290,11 +290,24 @@ private fun NotePopupContent(
                 }
             }
 
+            var showFullImage by remember(popup.note.id) { mutableStateOf(false) }
+
             Text(
                 text = "অধ্যায়: ${popup.chapter.title}",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (popup.note.imagePath.isNotBlank()) {
+                NoteAttachmentImagePreview(
+                    imagePath = popup.note.imagePath,
+                    contentDescription = "নোটের চিত্র: ${popup.note.content}",
+                    accentColor = accent,
+                    heightDp = 210,
+                    modifier = Modifier.testTag("popup_note_image_preview"),
+                    onClick = { showFullImage = true }
+                )
+            }
 
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -321,6 +334,14 @@ private fun NotePopupContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (showFullImage && popup.note.imagePath.isNotBlank()) {
+                NoteImageViewerDialog(
+                    imagePath = popup.note.imagePath,
+                    title = popup.note.content,
+                    onDismiss = { showFullImage = false }
+                )
+            }
         }
     }
 
