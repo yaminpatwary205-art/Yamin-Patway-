@@ -11,6 +11,7 @@ import com.example.data.local.*
 import com.example.data.remote.*
 import com.example.translation.TranslationOutcome
 import com.example.translation.TranslationService
+import com.example.ui.components.RichNoteCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -40,10 +41,9 @@ data class ParagraphCheckResult(
 class RevisionRepository(
     private val context: Context,
     val dao: AppDao,
-    private val firestoreSync: FirestoreSyncRepository,
-    initialUserId: String? = null
+    private val firestoreSync: FirestoreSyncRepository
 ) {
-    private var currentUserId: String? = initialUserId?.trim()?.takeIf { it.isNotEmpty() }
+    private var currentUserId: String? = null
 
     val translationService = TranslationService(
         dao = dao,
@@ -113,7 +113,6 @@ class RevisionRepository(
         if (!isOnline()) return Result.success(SyncStatus.OFFLINE)
         val res = firestoreSync.syncBidirectional(uid)
         return if (res.isSuccess) {
-            rescheduleAlarms()
             Result.success(SyncStatus.SYNCED)
         } else {
             Result.success(SyncStatus.ERROR)
@@ -187,13 +186,8 @@ class RevisionRepository(
         }
     }
 
-    private fun userImagesScopeFolder(): String {
-        val uid = currentUserId?.trim()?.takeIf { it.isNotEmpty() } ?: return "local"
-        return "u_" + uid.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(64)
-    }
-
     private fun noteImagesDir(): File {
-        val dir = File(File(context.filesDir, "note_images"), userImagesScopeFolder())
+        val dir = File(context.filesDir, "note_images")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
@@ -202,7 +196,8 @@ class RevisionRepository(
         try {
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@withContext null
             if (bytes.isEmpty()) return@withContext null
-            val outFile = File(noteImagesDir(), "${newId("img")}.jpg")
+            val fileName = "${newId("img")}.jpg"
+            val outFile = File(noteImagesDir(), fileName)
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             if (bounds.outWidth > 0 && bounds.outHeight > 0) {
@@ -217,28 +212,53 @@ class RevisionRepository(
                         bmp.compress(Bitmap.CompressFormat.JPEG, 88, fos)
                     }
                     bmp.recycle()
-                    return@withContext outFile.absolutePath
+                    return@withContext fileName
                 }
             }
-            // Fallback raw copy if platform decoder isn't available for this format
             outFile.writeBytes(bytes)
-            outFile.absolutePath
+            fileName
         } catch (_: Exception) {
             null
         }
     }
 
-    fun deleteUnusedLocalImage(imagePath: String, remainingNotes: List<NoteEntity>? = null) {
-        if (imagePath.isBlank()) return
+    suspend fun saveDrawnDiagramBitmap(bitmap: Bitmap): String? = withContext(Dispatchers.IO) {
         try {
-            val file = File(imagePath)
+            val fileName = "${newId("draw")}.png"
+            val outFile = File(noteImagesDir(), fileName)
+            FileOutputStream(outFile).use { fos ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 95, fos)
+            }
+            fileName
+        } catch (_: Exception) {
+            null
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    fun deleteUnusedLocalImage(imageRef: String, remainingNotes: List<NoteEntity>? = null) {
+        if (imageRef.isBlank()) return
+        try {
+            val file = RichNoteCodec.resolveImageFile(context.filesDir, imageRef)
             val imagesDir = noteImagesDir().canonicalPath
             if (!file.canonicalPath.startsWith(imagesDir)) return
-            val stillUsed = remainingNotes?.any { it.imagePath == imagePath } == true
+            val targetName = file.name
+            val stillUsed = remainingNotes?.any { note ->
+                RichNoteCodec.extractImageRefs(note.content, note.imagePath).any { ref ->
+                    File(ref).name == targetName || ref == imageRef
+                }
+            } == true
             if (!stillUsed && file.exists()) {
                 file.delete()
             }
         } catch (_: Exception) {
+        }
+    }
+
+    private fun deleteUnusedImagesForNote(note: NoteEntity, remainingNotes: List<NoteEntity>) {
+        RichNoteCodec.extractImageRefs(note.content, note.imagePath).forEach { ref ->
+            deleteUnusedLocalImage(ref, remainingNotes)
         }
     }
 
@@ -248,7 +268,7 @@ class RevisionRepository(
         dao.deleteChapterById(chapterId)
         val remaining = dao.getAllNotesOnce()
         for (note in notes) {
-            deleteUnusedLocalImage(note.imagePath, remaining)
+            deleteUnusedImagesForNote(note, remaining)
             if (currentUserId != null && isOnline()) {
                 firestoreSync.deleteDocOrQueue("notes", note.id)
             } else if (currentUserId != null) {
@@ -280,7 +300,7 @@ class RevisionRepository(
             id = newId("nt"),
             bookId = bookId,
             chapterId = chapterId,
-            content = finalContent.take(5000),
+            content = finalContent.take(10000),
             imagePath = cleanImage,
             starred = starred,
             sortOrder = maxOf(nextOrder, existingInChapter.size),
@@ -329,16 +349,18 @@ class RevisionRepository(
                 (old.overrideEnabled != 1 && note.overrideEnabled == 1)
             )
         val cleanImage = note.imagePath.trim()
-        val fallbackContent = if (cleanImage.isNotBlank()) "চিত্র নোট" else "-"
+        val hasAnyImage = cleanImage.isNotBlank() || RichNoteCodec.extractImageRefs(note.content).isNotEmpty()
+        val fallbackContent = if (hasAnyImage) "চিত্র নোট" else "-"
         val updated = note.copy(
-            content = note.content.trim().ifBlank { fallbackContent }.take(5000),
+            content = note.content.trim().ifBlank { fallbackContent }.take(10000),
             imagePath = cleanImage,
             lastTriggeredEpochMs = if (scheduleChanged) now else note.lastTriggeredEpochMs,
             updatedAtEpochMs = now
         )
         dao.upsertNote(updated)
-        if (old != null && old.imagePath.isNotBlank() && old.imagePath != cleanImage) {
-            deleteUnusedLocalImage(old.imagePath, dao.getAllNotesOnce())
+        if (old != null) {
+            val remaining = dao.getAllNotesOnce()
+            deleteUnusedImagesForNote(old, remaining)
         }
         if (currentUserId != null && isOnline()) {
             firestoreSync.pushDoc("notes", updated.id, updated.toFsMap())
@@ -385,17 +407,8 @@ class RevisionRepository(
     suspend fun duplicateNote(note: NoteEntity) {
         val existingInChapter = dao.getAllNotesOnce().filter { it.chapterId == note.chapterId }
         val nextOrder = if (existingInChapter.isEmpty()) 0 else maxOf(existingInChapter.maxOf { it.sortOrder } + 1, existingInChapter.size)
-        val copiedImagePath = if (note.imagePath.isNotBlank()) {
-            val src = File(note.imagePath)
-            if (src.exists()) {
-                val dest = File(noteImagesDir(), "${newId("img")}.jpg")
-                src.copyTo(dest, overwrite = true)
-                dest.absolutePath
-            } else ""
-        } else ""
         val copy = note.copy(
             id = newId("nt"),
-            imagePath = copiedImagePath,
             sortOrder = nextOrder,
             revisionCount = 0,
             lastRevisedEpochMs = 0L,
@@ -429,8 +442,8 @@ class RevisionRepository(
     suspend fun deleteNote(noteId: String) {
         val existing = dao.getNoteById(noteId)
         dao.deleteNoteById(noteId)
-        if (existing != null && existing.imagePath.isNotBlank()) {
-            deleteUnusedLocalImage(existing.imagePath, dao.getAllNotesOnce())
+        if (existing != null) {
+            deleteUnusedImagesForNote(existing, dao.getAllNotesOnce())
         }
         if (currentUserId != null && isOnline()) {
             firestoreSync.deleteDocOrQueue("notes", noteId)

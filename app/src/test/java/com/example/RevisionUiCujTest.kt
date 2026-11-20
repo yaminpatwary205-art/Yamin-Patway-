@@ -465,19 +465,24 @@ class RevisionUiCujTest {
     }
 
     @Test
-    fun `chapter detail displays note image, floating draggable diagram overlay, and fullscreen viewer`() {
+    fun `chapter detail renders inline picture inside note, opens zoom viewer and drawing pad`() {
         val book = DefaultBooksSeed.books[0]
         val chapter = ChapterEntity("ch_img_1", book.id, "চিত্র অধ্যায়", 0)
-        val imgFile = java.io.File(context.filesDir, "test_diagram.png").apply {
+        val notesDir = java.io.File(context.filesDir, "note_images").apply { mkdirs() }
+        val imgFile = java.io.File(notesDir, "test_diagram.png").apply {
             val bmp = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
             java.io.FileOutputStream(this).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
             bmp.recycle()
         }
         runBlocking {
             dao.upsertChapter(chapter)
-            repo.addNote(book.id, chapter.id, "হৃৎপিণ্ডের চিত্র", starred = true, imagePath = imgFile.absolutePath)
+            repo.addNote(
+                bookId = book.id,
+                chapterId = chapter.id,
+                content = "শুরুর বর্ণনা\n[[IMG:test_diagram.png]]\nশেষের ব্যাখ্যা",
+                starred = true
+            )
         }
-        val noteWithImg = runBlocking { dao.getAllNotesOnce().single() }
 
         composeRule.setContent {
             val state by viewModel.uiState.collectAsState()
@@ -493,39 +498,45 @@ class RevisionUiCujTest {
             }
         }
 
-        composeRule.onNodeWithTag("add_image_note_fab").assertIsDisplayed()
+        composeRule.onNodeWithTag("add_note_fab").assertIsDisplayed()
         composeRule.waitUntil(timeoutMillis = 5000) {
-            composeRule.onAllNodesWithTag("note_drag_handle_${noteWithImg.id}").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("inline_note_image_1").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("note_drag_handle_${noteWithImg.id}").assertIsDisplayed()
-        composeRule.onNodeWithTag("note_image_preview_${noteWithImg.id}").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("শুরুর বর্ণনা").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("inline_note_image_1").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("শেষের ব্যাখ্যা").performScrollTo().assertIsDisplayed()
 
-        // Pin floating draggable image anywhere on screen
-        composeRule.onNodeWithTag("pin_drag_image_${noteWithImg.id}").performScrollTo().performClick()
-        composeRule.onNodeWithTag("floating_image_overlay").assertIsDisplayed()
-        composeRule.onNodeWithTag("floating_image_resize_button").performClick()
-        composeRule.onNodeWithTag("close_floating_image_button").performClick()
-        composeRule.onAllNodesWithTag("floating_image_overlay").assertCountEquals(0)
-
-        // Open fullscreen zoom viewer
-        composeRule.onNodeWithTag("note_image_preview_${noteWithImg.id}").performScrollTo().performClick()
+        // Tap inline image to open fullscreen zoom viewer
+        composeRule.onNodeWithTag("inline_note_image_1").performScrollTo().performClick()
         composeRule.onNodeWithTag("note_image_viewer_dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("close_image_viewer_button").performClick()
         composeRule.onAllNodesWithTag("note_image_viewer_dialog").assertCountEquals(0)
+
+        // Open Add Note composer and verify gallery & drawing pad controls
+        composeRule.onNodeWithTag("add_note_fab").performClick()
+        composeRule.onNodeWithTag("insert_gallery_image_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("open_draw_diagram_button").performClick()
+        composeRule.onNodeWithTag("drawing_diagram_dialog").assertIsDisplayed()
 
         imgFile.delete()
     }
 
     @Test
-    fun `note popup overlay renders attached diagram image`() {
-        val imgFile = java.io.File(context.filesDir, "popup_diagram.png").apply {
+    fun `note popup overlay renders inline diagram image inside text without raw markers`() {
+        val notesDir = java.io.File(context.filesDir, "note_images").apply { mkdirs() }
+        val imgFile = java.io.File(notesDir, "popup_diagram.png").apply {
             val bmp = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
             java.io.FileOutputStream(this).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
             bmp.recycle()
         }
         val book = DefaultBooksSeed.books[0]
         val chapter = ChapterEntity("ch_pop", book.id, "জীববিজ্ঞান", 0)
-        val note = NoteEntity("n_img_pop", book.id, chapter.id, "কোষ বিভাজনের চিত্র", imagePath = imgFile.absolutePath)
+        val note = NoteEntity(
+            id = "n_img_pop",
+            bookId = book.id,
+            chapterId = chapter.id,
+            content = "কোষ বিভাজনের ধাপ\n[[IMG:popup_diagram.png]]\nপরবর্তী পয়েন্ট"
+        )
         val popup = ActivePopup.NotePopup(book, chapter, note)
 
         composeRule.setContent {
@@ -539,8 +550,9 @@ class RevisionUiCujTest {
             }
         }
 
-        composeRule.onNodeWithTag("popup_note_image_preview").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("কোষ বিভাজনের চিত্র").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("কোষ বিভাজনের ধাপ").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("inline_note_image_1").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("পরবর্তী পয়েন্ট").performScrollTo().assertIsDisplayed()
 
         imgFile.delete()
     }

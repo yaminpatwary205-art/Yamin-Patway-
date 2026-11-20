@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.credentials.CredentialManager
 import coil.compose.AsyncImage
-import com.example.alarm.AlarmRingingService
 import com.example.alarm.AlarmScheduler
 import com.example.firebase.onGoogleSignInClicked
 import com.example.firebase.signOutFromGoogle
@@ -139,11 +138,6 @@ fun SettingsScreen(
                                     Text(currentUser.email.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
-                            Text(
-                                "প্রতিটি Gmail অ্যাকাউন্টের নোট, অধ্যায়, প্যারাগ্রাফ ও অ্যালার্ম সম্পূর্ণ আলাদাভাবে সংরক্ষিত থাকে।",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 FilledTonalButton(
                                     onClick = { viewModel.syncNow() },
@@ -158,10 +152,6 @@ fun SettingsScreen(
                                         signOutFromGoogle(
                                             credentialManager = credentialManager,
                                             scope = scope,
-                                            onBeforeSignOut = {
-                                                AlarmScheduler.cancelAllAlarms(context)
-                                                AlarmRingingService.stop(context)
-                                            },
                                             onSignOutComplete = onSignedOut
                                         )
                                     },
@@ -172,7 +162,7 @@ fun SettingsScreen(
                             }
                         } else {
                             Text(
-                                "আপনি এখন লোকাল (অতিথি) মোডে আছেন। প্রতিটি Gmail অ্যাকাউন্টের তথ্য সম্পূর্ণ আলাদা থাকে — Google দিয়ে সাইন-ইন করলে ওই অ্যাকাউন্টের নিজস্ব ডেটা ও ক্লাউড সিঙ্ক লোড হবে।",
+                                "আপনি এখন লোকাল মোডে আছেন। Google দিয়ে সাইন-ইন করলে সব নোট, প্যারাগ্রাফ ও ভোকাবুলারি ক্লাউডে মার্জ ও সিঙ্ক হবে।",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -182,13 +172,13 @@ fun SettingsScreen(
                                         context = context,
                                         credentialManager = credentialManager,
                                         scope = scope,
-                                        onAuthSuccess = { statusMessage = "সাইন-ইন সম্পন্ন! এই অ্যাকাউন্টের ডেটা লোড হচ্ছে।" },
+                                        onAuthSuccess = { statusMessage = "সাইন-ইন সম্পন্ন! ক্লাউড ডেটা সিঙ্ক হচ্ছে।" },
                                         onAuthError = { err -> statusMessage = err }
                                     )
                                 },
                                 modifier = Modifier.fillMaxWidth().testTag("settings_google_signin_button")
                             ) {
-                                Text("Google দিয়ে সাইন-ইন করুন (আলাদা অ্যাকাউন্ট)")
+                                Text("Google দিয়ে সাইন-ইন ও মার্জ করুন")
                             }
                         }
                     }

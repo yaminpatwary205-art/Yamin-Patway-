@@ -715,7 +715,8 @@ private fun BooksAndNotesSection(
                 val book = bookMap[note.bookId]
                 val chap = chapterMap[note.chapterId]
                 val sched = if (book != null && chap != null) AlarmScheduler.resolveNoteSchedule(book, chap, note) else null
-                val matchesQuery = searchQuery.isBlank() || note.content.contains(searchQuery, ignoreCase = true)
+                val plainContent = RichNoteCodec.stripImageMarkers(note.content)
+                val matchesQuery = searchQuery.isBlank() || plainContent.contains(searchQuery, ignoreCase = true)
                 val matchesFilter = when (noteFilter) {
                     "starred" -> note.starred
                     "active" -> sched?.enabled == true
@@ -751,7 +752,7 @@ private fun BooksAndNotesSection(
                                     fontWeight = FontWeight.SemiBold,
                                     color = bookAccent
                                 )
-                                Text(note.content, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                Text(RichNoteCodec.stripImageMarkers(note.content), style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }

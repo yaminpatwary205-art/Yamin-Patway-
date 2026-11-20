@@ -101,13 +101,29 @@ fun onGoogleSignInClicked(
         onAuthError("সাইন-ইন শুরু করার জন্য Activity পাওয়া যায়নি।")
         return
     }
-    val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-    val request = GetCredentialRequest.Builder()
-        .addCredentialOption(signInOption)
-        .build()
     scope.launch {
         try {
-            val cred = credentialManager.getCredential(activity, request).credential
+            val cred = try {
+                val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+                val primaryRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(signInOption)
+                    .build()
+                credentialManager.getCredential(activity, primaryRequest).credential
+            } catch (cancel: GetCredentialCancellationException) {
+                throw cancel
+            } catch (primaryErr: Exception) {
+                Log.w(TAG, "Primary SignInWithGoogle failed, trying GoogleIdOption fallback: ${primaryErr.message}")
+                val fallbackOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val fallbackRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(fallbackOption)
+                    .build()
+                credentialManager.getCredential(activity, fallbackRequest).credential
+            }
+
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
                 Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
@@ -120,7 +136,7 @@ fun onGoogleSignInClicked(
             onAuthCancelled()
         } catch (e: NoCredentialException) {
             Log.w(TAG, "No Google credential available: ${e.message}", e)
-            onAuthError("এই ডিভাইসে কোনো Google অ্যাকাউন্ট পাওয়া যায়নি। অনুগ্রহ করে ডিভাইসে একটি Google অ্যাকাউন্ট যোগ করুন।")
+            onAuthError("এই ডিভাইসে কোনো Google অ্যাকাউন্ট পাওয়া যায়নি। অনুগ্রহ করে ফোনের সেটিংসে একটি Google অ্যাকাউন্ট যোগ করুন।")
         } catch (e: Exception) {
             Log.e(TAG, "Google Sign-In failed", e)
             onAuthError(e.localizedMessage ?: "সাইন-ইন ব্যর্থ হয়েছে। নেটওয়ার্ক পরীক্ষা করে আবার চেষ্টা করুন।")

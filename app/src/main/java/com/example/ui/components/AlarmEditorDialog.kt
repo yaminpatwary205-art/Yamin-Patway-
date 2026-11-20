@@ -482,7 +482,7 @@ fun AlarmEditorDialog(
                                                                     modifier = Modifier.testTag("alarm_select_note_${note.id}")
                                                                 )
                                                                 Text(
-                                                                    text = "#${idx + 1}. ${note.content}",
+                                                                    text = "#${idx + 1}. ${RichNoteCodec.stripImageMarkers(note.content)}",
                                                                     style = MaterialTheme.typography.bodySmall,
                                                                     maxLines = 2,
                                                                     overflow = TextOverflow.Ellipsis,

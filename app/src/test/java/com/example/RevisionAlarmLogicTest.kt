@@ -685,128 +685,93 @@ class RevisionAlarmLogicTest {
         java.io.FileOutputStream(tempInput).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         bmp.recycle()
 
-        val savedPath = repo.savePickedNoteImage(android.net.Uri.fromFile(tempInput))
-        assertNotNull(savedPath)
-        assertTrue(java.io.File(savedPath!!).exists())
+        val savedRef = repo.savePickedNoteImage(android.net.Uri.fromFile(tempInput))
+        assertNotNull(savedRef)
+        val resolvedFile = com.example.ui.components.RichNoteCodec.resolveImageFile(context.filesDir, savedRef!!)
+        assertTrue(resolvedFile.exists())
 
         repo.addNote(book.id, chapter.id, "প্রথম লেখা")
-        repo.addNote(book.id, chapter.id, "", starred = true, imagePath = savedPath)
+        repo.addNote(book.id, chapter.id, "[[IMG:$savedRef]]", starred = true)
 
         val notes = dao.getAllNotesOnce()
         assertEquals(2, notes.size)
         val imgNote = notes.last()
-        assertEquals("চিত্র নোট", imgNote.content)
-        assertEquals(savedPath, imgNote.imagePath)
+        assertEquals("চিত্র নোট", com.example.ui.components.RichNoteCodec.stripImageMarkers(imgNote.content))
 
-        // Move image note to #1 (dragged to top)
+        // Move image note to #1
         repo.moveNoteToPosition(chapter.id, imgNote.id, 0)
         assertEquals(imgNote.id, dao.getAllNotesOnce().first().id)
 
         // Delete image note cleans up local image file
         repo.deleteNote(imgNote.id)
-        assertFalse(java.io.File(savedPath).exists())
+        assertFalse(resolvedFile.exists())
         assertTrue(tempInput.delete())
     }
 
     @Test
-    fun `different gmail accounts and guest mode have strictly isolated databases and image directories`(): Unit = runBlocking {
-        val uid1 = "gmail_uid_1"
-        val uid2 = "gmail_uid_2"
+    fun `rich note codec inserts multiple gallery and drawn images at cursor in middle of text`() = runBlocking {
+        // Save a drawn bitmap diagram into note_images/
+        val drawnBmp = android.graphics.Bitmap.createBitmap(160, 100, android.graphics.Bitmap.Config.ARGB_8888)
+        val drawnRef = repo.saveDrawnDiagramBitmap(drawnBmp)
+        assertNotNull(drawnRef)
+        val drawnFile = com.example.ui.components.RichNoteCodec.resolveImageFile(context.filesDir, drawnRef!!)
+        assertTrue(drawnFile.exists())
 
-        val db1 = AppDatabase.getInstanceForUser(context, uid1)
-        val db2 = AppDatabase.getInstanceForUser(context, uid2)
-        val dbLocal = AppDatabase.getInstanceForUser(context, null)
-        try {
-            assertEquals("revision_alarm_u_gmail_uid_1.db", AppDatabase.dbNameForUser(uid1))
-            assertEquals("revision_alarm_u_gmail_uid_2.db", AppDatabase.dbNameForUser(uid2))
-            assertEquals("revision_alarm_local.db", AppDatabase.dbNameForUser(null))
-
-            val fs1 = FirestoreSyncRepository(
-                db = FirebaseFirestore.getInstance(context.getString(R.string.firestore_database_id)),
-                dao = db1.appDao(),
-                auth = FirebaseAuth.getInstance()
+        // Start with single text block with cursor in the middle (right after "প্রথম বাক্য। ")
+        val initialText = "প্রথম বাক্য। দ্বিতীয় বাক্য।"
+        val splitIndex = "প্রথম বাক্য। ".length
+        val startBlock = com.example.ui.components.NoteEditorBlock.TextBlock(
+            id = "blk_start",
+            value = androidx.compose.ui.text.input.TextFieldValue(
+                text = initialText,
+                selection = androidx.compose.ui.text.TextRange(splitIndex)
             )
-            val fs2 = FirestoreSyncRepository(
-                db = FirebaseFirestore.getInstance(context.getString(R.string.firestore_database_id)),
-                dao = db2.appDao(),
-                auth = FirebaseAuth.getInstance()
-            )
-            val fsLocal = FirestoreSyncRepository(
-                db = FirebaseFirestore.getInstance(context.getString(R.string.firestore_database_id)),
-                dao = dbLocal.appDao(),
-                auth = FirebaseAuth.getInstance()
-            )
+        )
 
-            val repo1 = RevisionRepository(context, db1.appDao(), fs1, initialUserId = uid1)
-            val repo2 = RevisionRepository(context, db2.appDao(), fs2, initialUserId = uid2)
-            val repoLocal = RevisionRepository(context, dbLocal.appDao(), fsLocal, initialUserId = null)
+        val (afterFirstInsert, secondTextId) = com.example.ui.components.RichNoteCodec.insertImageAtCursor(
+            blocks = listOf(startBlock),
+            activeTextBlockId = "blk_start",
+            imageRef = drawnRef
+        )
+        assertEquals(3, afterFirstInsert.size)
+        assertEquals("প্রথম বাক্য।", (afterFirstInsert[0] as com.example.ui.components.NoteEditorBlock.TextBlock).value.text.trim())
+        assertEquals(drawnRef, (afterFirstInsert[1] as com.example.ui.components.NoteEditorBlock.ImageBlock).imageRef)
+        assertEquals("দ্বিতীয় বাক্য।", (afterFirstInsert[2] as com.example.ui.components.NoteEditorBlock.TextBlock).value.text.trim())
 
-            repo1.ensureSeeded()
-            repo2.ensureSeeded()
-            repoLocal.ensureSeeded()
-
-            // Create temporary image to verify scoped image directories
-            val tempInput = java.io.File(context.cacheDir, "acct_isolation_img.png")
-            val bmp = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
-            java.io.FileOutputStream(tempInput).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-            bmp.recycle()
-
-            val img1 = repo1.savePickedNoteImage(android.net.Uri.fromFile(tempInput))!!
-            val img2 = repo2.savePickedNoteImage(android.net.Uri.fromFile(tempInput))!!
-            assertTrue(img1.contains("/note_images/u_gmail_uid_1/"))
-            assertTrue(img2.contains("/note_images/u_gmail_uid_2/"))
-            assertNotEquals(img1, img2)
-
-            // Account 1 adds data
-            val bookId = DefaultBooksSeed.books[0].id
-            repo1.addChapter(bookId, "Gmail 1 Chapter")
-            val ch1 = db1.appDao().getAllChaptersOnce().single()
-            repo1.addNote(bookId, ch1.id, "Secret note from Gmail 1", imagePath = img1)
-            repo1.addOrUpdateParagraph(null, "Gmail 1 Para", "Alpha line. Beta line.", 10, false, true)
-            repo1.addVocabList("Gmail 1 Vocab", 15, false, "candid - স্পষ্টভাষী")
-            repo1.saveAlarm(RevisionAlarmEntity(id = "al_u1", title = "Gmail 1 Alarm"))
-
-            // Account 2 starts clean with ZERO leakage from Account 1
-            assertTrue(db2.appDao().getAllChaptersOnce().isEmpty())
-            assertTrue(db2.appDao().getAllNotesOnce().isEmpty())
-            assertTrue(db2.appDao().getAllParagraphsOnce().isEmpty())
-            assertTrue(db2.appDao().getAllVocabListsOnce().isEmpty())
-            assertTrue(db2.appDao().getAllAlarmsOnce().isEmpty())
-
-            // Guest/local mode also starts clean with ZERO leakage
-            assertTrue(dbLocal.appDao().getAllChaptersOnce().isEmpty())
-            assertTrue(dbLocal.appDao().getAllNotesOnce().isEmpty())
-
-            // Account 2 adds its own data
-            repo2.addChapter(bookId, "Gmail 2 Chapter")
-            val ch2 = db2.appDao().getAllChaptersOnce().single()
-            repo2.addNote(bookId, ch2.id, "Note from Gmail 2", imagePath = img2)
-            assertEquals(1, db2.appDao().getAllNotesOnce().size)
-            assertEquals("Note from Gmail 2", db2.appDao().getAllNotesOnce().single().content)
-
-            // Verify Account 1 still has ONLY Account 1 data
-            assertEquals(1, db1.appDao().getAllChaptersOnce().size)
-            assertEquals("Gmail 1 Chapter", db1.appDao().getAllChaptersOnce().single().title)
-            assertEquals(1, db1.appDao().getAllNotesOnce().size)
-            assertEquals("Secret note from Gmail 1", db1.appDao().getAllNotesOnce().single().content)
-
-            // Active scope helper switches background receiver database dynamically
-            AppDatabase.setActiveUserScope(context, uid1)
-            assertEquals("Secret note from Gmail 1", AppDatabase.getInstance(context).appDao().getAllNotesOnce().single().content)
-            AppDatabase.setActiveUserScope(context, uid2)
-            assertEquals("Note from Gmail 2", AppDatabase.getInstance(context).appDao().getAllNotesOnce().single().content)
-
-            repo1.deleteUnusedLocalImage(img1)
-            repo2.deleteUnusedLocalImage(img2)
-            tempInput.delete()
-        } finally {
-            AppDatabase.closeCachedInstance(uid1)
-            AppDatabase.closeCachedInstance(uid2)
-            AppDatabase.closeCachedInstance(null)
-            context.deleteDatabase(AppDatabase.dbNameForUser(uid1))
-            context.deleteDatabase(AppDatabase.dbNameForUser(uid2))
-            context.deleteDatabase(AppDatabase.dbNameForUser(null))
+        // Move cursor to the end of the second text block and insert a second picture there
+        val withCursorAtEnd = afterFirstInsert.map { blk ->
+            if (blk is com.example.ui.components.NoteEditorBlock.TextBlock && blk.id == secondTextId) {
+                blk.copy(
+                    value = blk.value.copy(
+                        selection = androidx.compose.ui.text.TextRange(blk.value.text.length)
+                    )
+                )
+            } else blk
         }
+        val (afterSecondInsert, _) = com.example.ui.components.RichNoteCodec.insertImageAtCursor(
+            blocks = withCursorAtEnd,
+            activeTextBlockId = secondTextId,
+            imageRef = "img_gallery_2.jpg"
+        )
+        val serialized = com.example.ui.components.RichNoteCodec.serializeBlocks(afterSecondInsert)
+        val segments = com.example.ui.components.RichNoteCodec.parseSegments(serialized, filesDir = context.filesDir)
+
+        assertTrue(segments[0] is com.example.ui.components.RichNoteSegment.Text)
+        assertEquals("প্রথম বাক্য।", (segments[0] as com.example.ui.components.RichNoteSegment.Text).text)
+        assertTrue(segments[1] is com.example.ui.components.RichNoteSegment.Image)
+        assertEquals(drawnRef, (segments[1] as com.example.ui.components.RichNoteSegment.Image).ref)
+        assertTrue(segments[2] is com.example.ui.components.RichNoteSegment.Text)
+        assertEquals("দ্বিতীয় বাক্য।", (segments[2] as com.example.ui.components.RichNoteSegment.Text).text)
+        assertTrue(segments[3] is com.example.ui.components.RichNoteSegment.Image)
+        assertEquals("img_gallery_2.jpg", (segments[3] as com.example.ui.components.RichNoteSegment.Image).ref)
+
+        // Plain stripped copy text omits [[IMG:...]] markers cleanly
+        val stripped = com.example.ui.components.RichNoteCodec.stripImageMarkers(serialized)
+        assertEquals("প্রথম বাক্য।\nদ্বিতীয় বাক্য।", stripped)
+        assertFalse(stripped.contains("[[IMG:"))
+
+        repo.deleteUnusedLocalImage(drawnRef)
+        assertFalse(drawnFile.exists())
     }
 }
 

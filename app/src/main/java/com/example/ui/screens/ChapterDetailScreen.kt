@@ -4,7 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,26 +20,26 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import com.example.alarm.AlarmScheduler
 import com.example.data.RevisionRepository
 import com.example.data.local.BookEntity
 import com.example.data.local.ChapterEntity
 import com.example.data.local.NoteEntity
 import com.example.ui.components.AnimatedMeshBackground
-import com.example.ui.components.FloatingDraggableNoteImageOverlay
+import com.example.ui.components.DrawingDiagramDialog
 import com.example.ui.components.GlassCard
 import com.example.ui.components.NoteAttachmentImagePreview
+import com.example.ui.components.NoteEditorBlock
 import com.example.ui.components.NoteImageViewerDialog
+import com.example.ui.components.RichNoteCodec
+import com.example.ui.components.RichNoteContentView
+import com.example.ui.components.RichNoteSegment
 import com.example.ui.components.adaptiveAccent
 import com.example.ui.components.parseColorHex
 import kotlinx.coroutines.launch
@@ -55,8 +54,8 @@ fun ChapterDetailScreen(
     repository: RevisionRepository,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
     val accent = parseColorHex(book.colorHex)
     val displayAccent = adaptiveAccent(accent)
 
@@ -64,525 +63,321 @@ fun ChapterDetailScreen(
         notes.sortedWith(compareBy<NoteEntity>({ it.sortOrder }, { it.updatedAtEpochMs }, { it.id }))
     }
 
-    var draggingNoteId by remember { mutableStateOf<String?>(null) }
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    var displayNotes by remember { mutableStateOf(sortedNotes) }
-    var optimisticOrderIds by remember { mutableStateOf<List<String>?>(null) }
-    val itemHeights = remember { mutableStateMapOf<String, Int>() }
-
-    LaunchedEffect(sortedNotes) {
-        val pendingIds = optimisticOrderIds
-        if (pendingIds != null && sortedNotes.map { it.id } == pendingIds) {
-            optimisticOrderIds = null
-        }
-    }
-
-    val effectiveNotes = remember(sortedNotes, draggingNoteId, displayNotes, optimisticOrderIds) {
-        when {
-            draggingNoteId != null -> displayNotes
-            optimisticOrderIds != null -> {
-                val rank = optimisticOrderIds!!.withIndex().associate { it.value to it.index }
-                sortedNotes.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
-            }
-            else -> sortedNotes
-        }
-    }
-
     var showAddNote by remember { mutableStateOf(false) }
-    var prefilledImagePath by remember { mutableStateOf("") }
     var editingNote by remember { mutableStateOf<NoteEntity?>(null) }
     var movingNote by remember { mutableStateOf<NoteEntity?>(null) }
     var scheduleNote by remember { mutableStateOf<NoteEntity?>(null) }
     var showChapterSchedule by remember { mutableStateOf(false) }
     var bulkMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var viewingImageNote by remember { mutableStateOf<NoteEntity?>(null) }
-    var floatingImageNoteId by remember { mutableStateOf<String?>(null) }
-
-    val quickImagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val savedPath = repository.savePickedNoteImage(uri)
-                if (!savedPath.isNullOrBlank()) {
-                    prefilledImagePath = savedPath
-                    editingNote = null
-                    showAddNote = true
-                }
-            }
-        }
-    }
-
-    val floatingImageNote = remember(sortedNotes, floatingImageNoteId) {
-        floatingImageNoteId?.let { id ->
-            sortedNotes.firstOrNull { it.id == id && it.imagePath.isNotBlank() }
-        }
-    }
+    var viewingImage by remember { mutableStateOf<Pair<RichNoteSegment.Image, String>?>(null) }
 
     val chapterEnabled = if (chapter.overrideEnabled != -1) chapter.overrideEnabled == 1 else book.enabled
     val chapterInterval = if (chapter.overrideIntervalMinutes > 0) chapter.overrideIntervalMinutes else book.intervalMinutes
 
     AnimatedMeshBackground {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Scaffold(
-                containerColor = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.onBackground,
-                topBar = {
-                    TopAppBar(
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent,
-                            titleContentColor = MaterialTheme.colorScheme.onBackground,
-                            navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
-                            actionIconContentColor = MaterialTheme.colorScheme.onBackground
-                        ),
-                        navigationIcon = {
-                            IconButton(onClick = onBack, modifier = Modifier.testTag("back_from_chapter")) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান")
-                            }
-                        },
-                        title = {
-                            Column {
-                                Text(chapter.title, maxLines = 1)
-                                Text(book.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        },
-                        actions = {
-                            IconButton(
-                                onClick = { showChapterSchedule = true },
-                                modifier = Modifier.testTag("chapter_schedule_button")
-                            ) {
-                                Icon(Icons.Rounded.Timer, contentDescription = "অধ্যায়ের সময়সূচি")
-                            }
-                            IconButton(onClick = {
-                                bulkMode = !bulkMode
-                                selectedIds = emptySet()
-                            }) {
-                                Icon(
-                                    if (bulkMode) Icons.Rounded.Close else Icons.Rounded.Checklist,
-                                    contentDescription = "একাধিক বাছাই"
-                                )
-                            }
+        Scaffold(
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+            topBar = {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                        actionIconContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
+                    navigationIcon = {
+                        IconButton(onClick = onBack, modifier = Modifier.testTag("back_from_chapter")) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান")
                         }
-                    )
-                },
-                bottomBar = {
-                    if (bulkMode && selectedIds.isNotEmpty()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                            tonalElevation = 6.dp,
-                            modifier = Modifier.fillMaxWidth().navigationBarsPadding()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("${selectedIds.size}টি নির্বাচিত", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                                FilledTonalButton(onClick = {
-                                    scope.launch {
-                                        repository.bulkPauseNotes(selectedIds, pause = true)
-                                        bulkMode = false
-                                        selectedIds = emptySet()
-                                    }
-                                }) { Text("বিরতি দিন") }
-                                FilledTonalButton(onClick = {
-                                    scope.launch {
-                                        repository.bulkPauseNotes(selectedIds, pause = false)
-                                        bulkMode = false
-                                        selectedIds = emptySet()
-                                    }
-                                }) { Text("চালু করুন") }
-                                Button(
-                                    onClick = {
-                                        scope.launch {
-                                            repository.bulkDeleteNotes(selectedIds)
-                                            bulkMode = false
-                                            selectedIds = emptySet()
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                ) { Text("মুছুন") }
-                            }
+                    },
+                    title = {
+                        Column {
+                            Text(chapter.title, maxLines = 1)
+                            Text(book.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    }
-                },
-                floatingActionButton = {
-                    if (!bulkMode) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { showChapterSchedule = true },
+                            modifier = Modifier.testTag("chapter_schedule_button")
                         ) {
-                            SmallFloatingActionButton(
-                                onClick = {
-                                    quickImagePicker.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                },
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.testTag("add_image_note_fab")
-                            ) {
-                                Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = "অধ্যায়ের ছবি যোগ করুন")
-                            }
-                            ExtendedFloatingActionButton(
-                                onClick = {
-                                    prefilledImagePath = ""
-                                    showAddNote = true
-                                },
-                                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                                text = { Text("নতুন নোট") },
-                                modifier = Modifier.testTag("add_note_fab")
+                            Icon(Icons.Rounded.Timer, contentDescription = "অধ্যায়ের সময়সূচি")
+                        }
+                        IconButton(onClick = {
+                            bulkMode = !bulkMode
+                            selectedIds = emptySet()
+                        }) {
+                            Icon(
+                                if (bulkMode) Icons.Rounded.Close else Icons.Rounded.Checklist,
+                                contentDescription = "একাধিক বাছাই"
                             )
                         }
                     }
+                )
+            },
+            bottomBar = {
+                if (bulkMode && selectedIds.isNotEmpty()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        tonalElevation = 6.dp,
+                        modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("${selectedIds.size}টি নির্বাচিত", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                            FilledTonalButton(onClick = {
+                                scope.launch {
+                                    repository.bulkPauseNotes(selectedIds, pause = true)
+                                    bulkMode = false
+                                    selectedIds = emptySet()
+                                }
+                            }) { Text("বিরতি দিন") }
+                            FilledTonalButton(onClick = {
+                                scope.launch {
+                                    repository.bulkPauseNotes(selectedIds, pause = false)
+                                    bulkMode = false
+                                    selectedIds = emptySet()
+                                }
+                            }) { Text("চালু করুন") }
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        repository.bulkDeleteNotes(selectedIds)
+                                        bulkMode = false
+                                        selectedIds = emptySet()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) { Text("মুছুন") }
+                        }
+                    }
                 }
-            ) { innerPadding ->
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 104.dp)
-                ) {
-                    item {
-                        GlassCard(accentColor = accent, modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(
-                                    if (chapterEnabled) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
-                                    contentDescription = null,
-                                    tint = if (chapterEnabled) displayAccent else MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            floatingActionButton = {
+                if (!bulkMode) {
+                    ExtendedFloatingActionButton(
+                        onClick = { showAddNote = true },
+                        icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                        text = { Text("নতুন নোট") },
+                        modifier = Modifier.testTag("add_note_fab")
+                    )
+                }
+            }
+        ) { innerPadding ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 96.dp)
+            ) {
+                item {
+                    GlassCard(accentColor = accent, modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                if (chapterEnabled) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
+                                contentDescription = null,
+                                tint = if (chapterEnabled) displayAccent else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (chapterEnabled) "অধ্যায়ের অ্যালার্ম: প্রতি $chapterInterval মি. পরপর" else "অধ্যায়ের অ্যালার্ম বন্ধ আছে",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
                                 )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = if (chapterEnabled) "অধ্যায়ের অ্যালার্ম: প্রতি $chapterInterval মি. পরপর" else "অধ্যায়ের অ্যালার্ম বন্ধ আছে",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "মোট ${sortedNotes.size}টি নোট • টেনে (#) ক্রম বদলান বা ছবি যেকোনো স্থানে রাখুন",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                FilledTonalButton(
-                                    onClick = { showChapterSchedule = true },
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(34.dp).testTag("chapter_timer_quick_button")
-                                ) {
-                                    Text("সময় সেট", style = MaterialTheme.typography.labelSmall)
-                                }
+                                Text(
+                                    text = "মোট ${sortedNotes.size}টি নোট • লেখার মাঝে ছবি বা আঁকা চিত্র যোগ করুন",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            FilledTonalButton(
+                                onClick = { showChapterSchedule = true },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp).testTag("chapter_timer_quick_button")
+                            ) {
+                                Text("সময় সেট", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
+                }
 
-                    if (effectiveNotes.isEmpty()) {
-                        item {
-                            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                                Column(
-                                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(Icons.AutoMirrored.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(40.dp), tint = displayAccent)
-                                    Text("এই অধ্যায়ে এখনো কোনো নোট নেই", style = MaterialTheme.typography.titleMedium)
-                                    Text(
-                                        "নোট বা গুরুত্বপূর্ণ ছবি যোগ করলে #১, #২... ক্রমে এবং টেনে যেকোনো স্থানে সাজিয়ে রাখা যাবে।",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                if (sortedNotes.isEmpty()) {
+                    item {
+                        GlassCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(40.dp), tint = displayAccent)
+                                Text("এই অধ্যায়ে এখনো কোনো নোট নেই", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "নোট লিখুন এবং প্রয়োজনীয় ছবি বা ডায়াগ্রাম লেখার মাঝখানে বা যেকোনো স্থানে যোগ করুন।",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
-                    } else {
-                        itemsIndexed(effectiveNotes, key = { _, note -> note.id }) { index, note ->
-                            val isSelected = note.id in selectedIds
-                            val isDragging = draggingNoteId == note.id
-                            val isFloating = floatingImageNoteId == note.id
-                            val effectiveSched = AlarmScheduler.resolveNoteSchedule(book, chapter, note)
-                            val spacingPx = with(density) { 10.dp.toPx() }
-
-                            GlassCard(
-                                accentColor = accent,
-                                onClick = {
+                    }
+                } else {
+                    itemsIndexed(sortedNotes, key = { _, note -> note.id }) { index, note ->
+                        val isSelected = note.id in selectedIds
+                        val effectiveSched = AlarmScheduler.resolveNoteSchedule(book, chapter, note)
+                        GlassCard(
+                            accentColor = accent,
+                            onClick = {
+                                if (bulkMode) {
+                                    selectedIds = if (isSelected) selectedIds - note.id else selectedIds + note.id
+                                } else {
+                                    editingNote = note
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("note_card_${note.id}")
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     if (bulkMode) {
-                                        selectedIds = if (isSelected) selectedIds - note.id else selectedIds + note.id
+                                        Checkbox(
+                                            checked = isSelected,
+                                            onCheckedChange = { checked ->
+                                                selectedIds = if (checked) selectedIds + note.id else selectedIds - note.id
+                                            }
+                                        )
                                     } else {
-                                        editingNote = note
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .zIndex(if (isDragging) 12f else 0f)
-                                    .onSizeChanged { itemHeights[note.id] = it.height }
-                                    .graphicsLayer {
-                                        if (isDragging) {
-                                            translationY = dragOffsetY
-                                            scaleX = 1.02f
-                                            scaleY = 1.02f
-                                            shadowElevation = 18f
-                                        }
-                                    }
-                                    .testTag("note_card_${note.id}")
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        if (bulkMode) {
-                                            Checkbox(
-                                                checked = isSelected,
-                                                onCheckedChange = { checked ->
-                                                    selectedIds = if (checked) selectedIds + note.id else selectedIds - note.id
-                                                }
-                                            )
-                                        } else {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                            ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier
-                                                        .size(36.dp)
-                                                        .pointerInput(note.id) {
-                                                            detectDragGestures(
-                                                                onDragStart = {
-                                                                    displayNotes = effectiveNotes
-                                                                    draggingNoteId = note.id
-                                                                    dragOffsetY = 0f
-                                                                },
-                                                                onDragCancel = {
-                                                                    draggingNoteId = null
-                                                                    dragOffsetY = 0f
-                                                                    displayNotes = sortedNotes
-                                                                },
-                                                                onDragEnd = {
-                                                                    val finalList = displayNotes
-                                                                    val finalIdx = finalList.indexOfFirst { it.id == note.id }
-                                                                    optimisticOrderIds = finalList.map { it.id }
-                                                                    draggingNoteId = null
-                                                                    dragOffsetY = 0f
-                                                                    if (finalIdx >= 0) {
-                                                                        scope.launch {
-                                                                            repository.moveNoteToPosition(chapter.id, note.id, finalIdx)
-                                                                        }
-                                                                    }
-                                                                },
-                                                                onDrag = { change, dragAmount ->
-                                                                    change.consume()
-                                                                    val currentIdx = displayNotes.indexOfFirst { it.id == note.id }
-                                                                    if (currentIdx != -1) {
-                                                                        dragOffsetY += dragAmount.y
-                                                                        if (dragOffsetY > 0f && currentIdx < displayNotes.lastIndex) {
-                                                                            val nextNote = displayNotes[currentIdx + 1]
-                                                                            val nextHeight = (itemHeights[nextNote.id] ?: 160).toFloat()
-                                                                            if (dragOffsetY > nextHeight / 2f + spacingPx) {
-                                                                                val mutable = displayNotes.toMutableList()
-                                                                                mutable[currentIdx] = nextNote
-                                                                                mutable[currentIdx + 1] = note
-                                                                                displayNotes = mutable
-                                                                                dragOffsetY -= (nextHeight + spacingPx)
-                                                                            }
-                                                                        } else if (dragOffsetY < 0f && currentIdx > 0) {
-                                                                            val prevNote = displayNotes[currentIdx - 1]
-                                                                            val prevHeight = (itemHeights[prevNote.id] ?: 160).toFloat()
-                                                                            if (-dragOffsetY > prevHeight / 2f + spacingPx) {
-                                                                                val mutable = displayNotes.toMutableList()
-                                                                                mutable[currentIdx] = prevNote
-                                                                                mutable[currentIdx - 1] = note
-                                                                                displayNotes = mutable
-                                                                                dragOffsetY += (prevHeight + spacingPx)
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            )
-                                                        }
-                                                        .semantics(mergeDescendants = true) {}
-                                                        .testTag("note_drag_handle_${note.id}")
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Rounded.DragIndicator,
-                                                        contentDescription = "টেনে যেকোনো স্থানে সাজান",
-                                                        tint = if (isDragging) displayAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                }
-                                                Surface(
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    color = displayAccent.copy(alpha = 0.16f),
-                                                    contentColor = displayAccent,
-                                                    modifier = Modifier
-                                                        .clickable { scheduleNote = note }
-                                                        .testTag("note_order_badge_${note.id}")
-                                                ) {
-                                                    Text(
-                                                        text = "#${index + 1}",
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Text(
-                                            text = note.content,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        IconButton(onClick = {
-                                            scope.launch { repository.updateNote(note.copy(starred = !note.starred)) }
-                                        }) {
-                                            Icon(
-                                                if (note.starred) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                                                contentDescription = "তারকা",
-                                                tint = if (note.starred) adaptiveAccent(Color(0xFFF59E0B)) else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    if (note.imagePath.isNotBlank()) {
-                                        NoteAttachmentImagePreview(
-                                            imagePath = note.imagePath,
-                                            contentDescription = "নোটের সংযুক্ত ছবি",
-                                            accentColor = accent,
-                                            heightDp = 172,
-                                            modifier = Modifier.testTag("note_image_preview_${note.id}"),
-                                            onClick = { viewingImageNote = note }
-                                        )
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = displayAccent.copy(alpha = 0.16f),
+                                            contentColor = displayAccent,
+                                            modifier = Modifier
+                                                .clickable { scheduleNote = note }
+                                                .testTag("note_order_badge_${note.id}")
                                         ) {
-                                            FilledTonalButton(
-                                                onClick = {
-                                                    floatingImageNoteId = if (isFloating) null else note.id
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(34.dp)
-                                                    .testTag("pin_drag_image_${note.id}"),
-                                                colors = if (isFloating) {
-                                                    ButtonDefaults.filledTonalButtonColors(
-                                                        containerColor = displayAccent.copy(alpha = 0.22f),
-                                                        contentColor = displayAccent
-                                                    )
-                                                } else {
-                                                    ButtonDefaults.filledTonalButtonColors()
-                                                }
-                                            ) {
-                                                Icon(Icons.Rounded.OpenWith, contentDescription = null, modifier = Modifier.size(15.dp))
-                                                Spacer(Modifier.width(4.dp))
-                                                Text(
-                                                    if (isFloating) "ভাসমান চলছে" else "ভাসমান রাখুন",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    maxLines = 1
-                                                )
-                                            }
-                                            OutlinedButton(
-                                                onClick = { viewingImageNote = note },
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                modifier = Modifier.height(34.dp).testTag("zoom_note_image_${note.id}")
-                                            ) {
-                                                Icon(Icons.Rounded.ZoomIn, contentDescription = null, modifier = Modifier.size(15.dp))
-                                                Spacer(Modifier.width(4.dp))
-                                                Text("বড় করে দেখুন", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                                            }
+                                            Text(
+                                                text = "#${index + 1}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
                                         }
+                                    }
+                                    RichNoteContentView(
+                                        content = note.content,
+                                        legacyImagePath = note.imagePath,
+                                        accentColor = accent,
+                                        imageHeightDp = 160,
+                                        onImageClick = { seg ->
+                                            viewingImage = seg to RichNoteCodec.stripImageMarkers(note.content)
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = {
+                                        scope.launch { repository.updateNote(note.copy(starred = !note.starred)) }
+                                    }) {
+                                        Icon(
+                                            if (note.starred) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                            contentDescription = "তারকা",
+                                            tint = if (note.starred) adaptiveAccent(Color(0xFFF59E0B)) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val isNotePaused = !effectiveSched.enabled
+                                    val statusText = buildString {
+                                        append("পড়া: ${note.revisionCount}")
+                                        if (isNotePaused) append(" • বন্ধ")
+                                        else if (note.overrideIntervalMinutes > 0) append(" • নিজস্ব ${note.overrideIntervalMinutes} মি.")
+                                        else append(" • ${effectiveSched.intervalMinutes} মি.")
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            val nextOverride = if (note.overrideEnabled == 0) 1 else 0
+                                            scope.launch { repository.updateNote(note.copy(overrideEnabled = nextOverride)) }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                        modifier = Modifier.weight(1f, fill = false).height(34.dp).testTag("note_toggle_alarm_${note.id}")
+                                    ) {
+                                        Icon(
+                                            if (isNotePaused) Icons.Rounded.NotificationsOff else Icons.Rounded.NotificationsActive,
+                                            contentDescription = "অ্যালার্ম চালু/বন্ধ",
+                                            modifier = Modifier.size(15.dp),
+                                            tint = if (isNotePaused) MaterialTheme.colorScheme.onSurfaceVariant else displayAccent
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = statusText,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1,
+                                            color = if (isNotePaused) MaterialTheme.colorScheme.onSurfaceVariant else displayAccent
+                                        )
                                     }
 
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.horizontalScroll(rememberScrollState())
                                     ) {
-                                        val isNotePaused = !effectiveSched.enabled
-                                        val statusText = buildString {
-                                            append("পড়া: ${note.revisionCount}")
-                                            if (isNotePaused) append(" • বন্ধ")
-                                            else if (note.overrideIntervalMinutes > 0) append(" • নিজস্ব ${note.overrideIntervalMinutes} মি.")
-                                            else append(" • ${effectiveSched.intervalMinutes} মি.")
-                                        }
-                                        TextButton(
-                                            onClick = {
-                                                val nextOverride = if (note.overrideEnabled == 0) 1 else 0
-                                                scope.launch { repository.updateNote(note.copy(overrideEnabled = nextOverride)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                            modifier = Modifier.weight(1f, fill = false).height(34.dp).testTag("note_toggle_alarm_${note.id}")
-                                        ) {
-                                            Icon(
-                                                if (isNotePaused) Icons.Rounded.NotificationsOff else Icons.Rounded.NotificationsActive,
-                                                contentDescription = "অ্যালার্ম চালু/বন্ধ",
-                                                modifier = Modifier.size(15.dp),
-                                                tint = if (isNotePaused) MaterialTheme.colorScheme.onSurfaceVariant else displayAccent
-                                            )
-                                            Spacer(Modifier.width(4.dp))
-                                            Text(
-                                                text = statusText,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                color = if (isNotePaused) MaterialTheme.colorScheme.onSurfaceVariant else displayAccent
-                                            )
-                                        }
-
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.horizontalScroll(rememberScrollState())
-                                        ) {
-                                            if (index > 0) {
-                                                IconButton(
-                                                    onClick = {
-                                                        scope.launch {
-                                                            repository.swapNoteOrder(chapter.id, note.id, effectiveNotes[index - 1].id)
-                                                        }
-                                                    },
-                                                    modifier = Modifier.size(34.dp).testTag("note_move_up_${note.id}")
-                                                ) {
-                                                    Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "আগে নিন", modifier = Modifier.size(20.dp))
-                                                }
-                                            }
-                                            if (index < effectiveNotes.lastIndex) {
-                                                IconButton(
-                                                    onClick = {
-                                                        scope.launch {
-                                                            repository.swapNoteOrder(chapter.id, note.id, effectiveNotes[index + 1].id)
-                                                        }
-                                                    },
-                                                    modifier = Modifier.size(34.dp).testTag("note_move_down_${note.id}")
-                                                ) {
-                                                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "পরে নিন", modifier = Modifier.size(20.dp))
-                                                }
-                                            }
+                                        if (index > 0) {
                                             IconButton(
-                                                onClick = { scheduleNote = note },
-                                                modifier = Modifier.size(34.dp).testTag("note_schedule_button_${note.id}")
+                                                onClick = {
+                                                    scope.launch {
+                                                        repository.swapNoteOrder(chapter.id, note.id, sortedNotes[index - 1].id)
+                                                    }
+                                                },
+                                                modifier = Modifier.size(34.dp).testTag("note_move_up_${note.id}")
                                             ) {
-                                                Icon(Icons.Rounded.Timer, contentDescription = "নোট ক্রম ও সময়", modifier = Modifier.size(19.dp))
+                                                Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "আগে নিন", modifier = Modifier.size(20.dp))
                                             }
+                                        }
+                                        if (index < sortedNotes.lastIndex) {
                                             IconButton(
-                                                onClick = { scope.launch { repository.duplicateNote(note) } },
+                                                onClick = {
+                                                    scope.launch {
+                                                        repository.swapNoteOrder(chapter.id, note.id, sortedNotes[index + 1].id)
+                                                    }
+                                                },
+                                                modifier = Modifier.size(34.dp).testTag("note_move_down_${note.id}")
+                                            ) {
+                                                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "পরে নিন", modifier = Modifier.size(20.dp))
+                                            }
+                                        }
+                                        IconButton(
+                                            onClick = { scheduleNote = note },
+                                            modifier = Modifier.size(34.dp).testTag("note_schedule_button_${note.id}")
+                                        ) {
+                                            Icon(Icons.Rounded.Timer, contentDescription = "নোট ক্রম ও সময়", modifier = Modifier.size(19.dp))
+                                        }
+                                        IconButton(
+                                            onClick = { scope.launch { repository.duplicateNote(note) } },
+                                            modifier = Modifier.size(34.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.ContentCopy, contentDescription = "ডুপ্লিকেট", modifier = Modifier.size(18.dp))
+                                        }
+                                        if (allChaptersInBook.size > 1) {
+                                            IconButton(
+                                                onClick = { movingNote = note },
                                                 modifier = Modifier.size(34.dp)
                                             ) {
-                                                Icon(Icons.Rounded.ContentCopy, contentDescription = "ডুপ্লিকেট", modifier = Modifier.size(18.dp))
+                                                Icon(Icons.AutoMirrored.Rounded.DriveFileMove, contentDescription = "অন্য অধ্যায়ে নিন", modifier = Modifier.size(19.dp))
                                             }
-                                            if (allChaptersInBook.size > 1) {
-                                                IconButton(
-                                                    onClick = { movingNote = note },
-                                                    modifier = Modifier.size(34.dp)
-                                                ) {
-                                                    Icon(Icons.AutoMirrored.Rounded.DriveFileMove, contentDescription = "অন্য অধ্যায়ে নিন", modifier = Modifier.size(19.dp))
-                                                }
-                                            }
-                                            IconButton(
-                                                onClick = { scope.launch { repository.deleteNote(note.id) } },
-                                                modifier = Modifier.size(34.dp)
-                                            ) {
-                                                Icon(Icons.Rounded.DeleteOutline, contentDescription = "মুছুন", modifier = Modifier.size(19.dp), tint = MaterialTheme.colorScheme.error)
-                                            }
+                                        }
+                                        IconButton(
+                                            onClick = { scope.launch { repository.deleteNote(note.id) } },
+                                            modifier = Modifier.size(34.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = "মুছুন", modifier = Modifier.size(19.dp), tint = MaterialTheme.colorScheme.error)
                                         }
                                     }
                                 }
@@ -590,128 +385,220 @@ fun ChapterDetailScreen(
                         }
                     }
                 }
-            }
-
-            if (floatingImageNote != null) {
-                FloatingDraggableNoteImageOverlay(
-                    note = floatingImageNote,
-                    accentColor = accent,
-                    onOpenFullScreen = { viewingImageNote = floatingImageNote },
-                    onClose = { floatingImageNoteId = null }
-                )
             }
         }
     }
 
     if (showAddNote || editingNote != null) {
         val editing = editingNote
-        var content by remember(editing, prefilledImagePath) { mutableStateOf(editing?.content.orEmpty()) }
-        var starred by remember(editing) { mutableStateOf(editing?.starred ?: false) }
-        var pickedImagePath by remember(editing, prefilledImagePath) {
-            mutableStateOf(editing?.imagePath ?: prefilledImagePath)
+        val blocks = remember(editing?.id, showAddNote) {
+            mutableStateListOf<NoteEditorBlock>().apply {
+                addAll(RichNoteCodec.toEditorBlocks(editing?.content.orEmpty(), editing?.imagePath.orEmpty()))
+            }
         }
-        var multipleMode by remember(editing) { mutableStateOf(false) }
+        var activeTextBlockId by remember(editing?.id, showAddNote) {
+            mutableStateOf(blocks.firstOrNull { it is NoteEditorBlock.TextBlock }?.id)
+        }
+        var starred by remember(editing?.id, showAddNote) { mutableStateOf(editing?.starred ?: false) }
+        var multipleMode by remember(editing?.id, showAddNote) { mutableStateOf(false) }
+        var showDrawingDialog by remember(editing?.id, showAddNote) { mutableStateOf(false) }
+        val newlyAddedRefs = remember(editing?.id, showAddNote) { mutableStateListOf<String>() }
 
         val dialogImagePicker = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.PickVisualMedia()
         ) { uri ->
             if (uri != null) {
                 scope.launch {
-                    val saved = repository.savePickedNoteImage(uri)
-                    if (!saved.isNullOrBlank()) {
-                        pickedImagePath = saved
+                    val savedRef = repository.savePickedNoteImage(uri)
+                    if (!savedRef.isNullOrBlank()) {
+                        val (updated, afterId) = RichNoteCodec.insertImageAtCursor(blocks.toList(), activeTextBlockId, savedRef)
+                        blocks.clear()
+                        blocks.addAll(updated)
+                        activeTextBlockId = afterId
+                        newlyAddedRefs.add(savedRef)
                         multipleMode = false
                     }
                 }
             }
         }
 
+        val hasImages = blocks.any { it is NoteEditorBlock.ImageBlock }
+        val hasContent = blocks.any {
+            (it is NoteEditorBlock.TextBlock && it.value.text.isNotBlank()) ||
+                (it is NoteEditorBlock.ImageBlock && it.imageRef.isNotBlank())
+        }
+        val firstTextBlockId = blocks.firstOrNull { it is NoteEditorBlock.TextBlock }?.id
+
+        fun dismissDialogCleanup() {
+            newlyAddedRefs.forEach { ref -> repository.deleteUnusedLocalImage(ref, sortedNotes) }
+            newlyAddedRefs.clear()
+            showAddNote = false
+            editingNote = null
+        }
+
         AlertDialog(
-            onDismissRequest = {
-                if (editing == null && pickedImagePath.isNotBlank()) {
-                    repository.deleteUnusedLocalImage(pickedImagePath, sortedNotes)
-                }
-                showAddNote = false
-                editingNote = null
-                prefilledImagePath = ""
-            },
-            title = { Text(if (editing == null) "নতুন নোট / চিত্র যোগ করুন" else "নোট সম্পাদনা") },
+            onDismissRequest = { dismissDialogCleanup() },
+            title = { Text(if (editing == null) "নতুন নোট লিখুন" else "নোট সম্পাদনা") },
             text = {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.verticalScroll(rememberScrollState())
                 ) {
-                    OutlinedTextField(
-                        value = content,
-                        onValueChange = { content = it },
-                        label = {
-                            Text(
-                                if (multipleMode && editing == null)
-                                    "প্রতি লাইনে একটি করে একাধিক নোট লিখুন"
-                                else if (pickedImagePath.isNotBlank())
-                                    "ছবির বিবরণ বা ক্যাপশন (ঐচ্ছিক)"
-                                else
-                                    "নোটের বিষয়বস্তু (বাংলা বা ইংরেজি)"
-                            )
-                        },
-                        minLines = if (multipleMode) 5 else 3,
-                        modifier = Modifier.fillMaxWidth().testTag("note_content_input")
-                    )
-
-                    if (pickedImagePath.isNotBlank()) {
-                        NoteAttachmentImagePreview(
-                            imagePath = pickedImagePath,
-                            contentDescription = "নির্বাচিত ছবি",
-                            accentColor = accent,
-                            heightDp = 150
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    dialogImagePicker.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                },
-                                modifier = Modifier.weight(1f).testTag("add_note_image_button")
-                            ) {
-                                Icon(Icons.Rounded.Image, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("বদলান", maxLines = 1)
-                            }
-                            TextButton(
-                                onClick = {
-                                    if (editing == null || editing.imagePath != pickedImagePath) {
-                                        repository.deleteUnusedLocalImage(pickedImagePath, sortedNotes)
-                                    }
-                                    pickedImagePath = ""
-                                },
-                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier.testTag("remove_note_image_button")
-                            ) {
-                                Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("ছবি সরান")
-                            }
-                        }
-                    } else {
+                    // Inline Picture Insertion Toolbar: Gallery or Finger Drawing
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         FilledTonalButton(
                             onClick = {
                                 dialogImagePicker.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
                             },
-                            modifier = Modifier.fillMaxWidth().testTag("add_note_image_button")
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.weight(1f).testTag("insert_gallery_image_button")
                         ) {
-                            Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("গ্যালারি থেকে ছবি / চিত্র যোগ করুন")
+                            Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("গ্যালারি ছবি", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        }
+                        OutlinedButton(
+                            onClick = { showDrawingDialog = true },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.weight(1f).testTag("open_draw_diagram_button")
+                        ) {
+                            Icon(Icons.Rounded.Draw, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("চিত্র আঁকুন", maxLines = 1, style = MaterialTheme.typography.labelMedium)
                         }
                     }
 
-                    if (editing == null && pickedImagePath.isBlank()) {
+                    Text(
+                        text = "কার্সর যেখানে রাখবেন ঠিক সেখানেই (শুরুতে, লেখার মাঝখানে বা শেষে) ছবি ও আঁকা চিত্র বসবে।",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    blocks.forEachIndexed { idx, block ->
+                        when (block) {
+                            is NoteEditorBlock.TextBlock -> {
+                                val isFirst = block.id == firstTextBlockId
+                                val fieldTag = if (isFirst) "note_content_input" else "note_content_input_${block.id}"
+                                OutlinedTextField(
+                                    value = block.value,
+                                    onValueChange = { newValue ->
+                                        activeTextBlockId = block.id
+                                        val pos = blocks.indexOfFirst { it.id == block.id }
+                                        if (pos >= 0) {
+                                            blocks[pos] = block.copy(value = newValue)
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            when {
+                                                multipleMode && !hasImages && isFirst -> "প্রতি লাইনে একটি করে একাধিক নোট লিখুন"
+                                                hasImages && !isFirst -> "ছবির পরের লেখা (ঐচ্ছিক)"
+                                                else -> "নোটের বিষয়বস্তু (বাংলা বা ইংরেজি)"
+                                            }
+                                        )
+                                    },
+                                    minLines = if (multipleMode && !hasImages && isFirst) 5 else 2,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { if (it.isFocused) activeTextBlockId = block.id }
+                                        .testTag(fieldTag)
+                                )
+                            }
+
+                            is NoteEditorBlock.ImageBlock -> {
+                                val imgFile = RichNoteCodec.resolveImageFile(context.filesDir, block.imageRef)
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    modifier = Modifier.fillMaxWidth().testTag("editor_image_block_${block.id}")
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        NoteAttachmentImagePreview(
+                                            imageFile = imgFile,
+                                            contentDescription = "নোটের চিত্র",
+                                            accentColor = accent,
+                                            heightDp = 148,
+                                            onClick = {
+                                                viewingImage = RichNoteSegment.Image(block.imageRef, imgFile) to "নোটের চিত্র"
+                                            }
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        val pos = blocks.indexOfFirst { it.id == block.id }
+                                                        if (pos > 0) {
+                                                            val item = blocks.removeAt(pos)
+                                                            blocks.add(pos - 1, item)
+                                                        }
+                                                    },
+                                                    enabled = idx > 0,
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    modifier = Modifier.height(32.dp)
+                                                ) {
+                                                    Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "উপরে নিন", modifier = Modifier.size(16.dp))
+                                                    Text("আগে", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        val pos = blocks.indexOfFirst { it.id == block.id }
+                                                        if (pos >= 0 && pos < blocks.lastIndex) {
+                                                            val item = blocks.removeAt(pos)
+                                                            blocks.add(pos + 1, item)
+                                                        }
+                                                    },
+                                                    enabled = idx < blocks.lastIndex,
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    modifier = Modifier.height(32.dp)
+                                                ) {
+                                                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "নিচে নিন", modifier = Modifier.size(16.dp))
+                                                    Text("পরে", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                            TextButton(
+                                                onClick = {
+                                                    val pos = blocks.indexOfFirst { it.id == block.id }
+                                                    if (pos >= 0) {
+                                                        blocks.removeAt(pos)
+                                                        if (block.imageRef in newlyAddedRefs) {
+                                                            repository.deleteUnusedLocalImage(block.imageRef, sortedNotes)
+                                                            newlyAddedRefs.remove(block.imageRef)
+                                                        }
+                                                        if (blocks.none { it is NoteEditorBlock.TextBlock }) {
+                                                            val fresh = NoteEditorBlock.TextBlock(RichNoteCodec.newBlockId(), androidx.compose.ui.text.input.TextFieldValue(""))
+                                                            blocks.add(fresh)
+                                                            activeTextBlockId = fresh.id
+                                                        }
+                                                    }
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                                modifier = Modifier.height(32.dp).testTag("remove_editor_image_${block.id}")
+                                            ) {
+                                                Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("সরান", style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (editing == null && !hasImages) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(
                                 checked = multipleMode,
@@ -730,57 +617,69 @@ fun ChapterDetailScreen(
             confirmButton = {
                 Button(
                     onClick = {
+                        val serialized = RichNoteCodec.serializeBlocks(blocks.toList())
                         scope.launch {
                             if (editing == null) {
-                                if (multipleMode && pickedImagePath.isBlank()) {
-                                    repository.addMultipleNotes(book.id, chapter.id, content, starred)
+                                if (multipleMode && !hasImages) {
+                                    repository.addMultipleNotes(book.id, chapter.id, serialized, starred)
                                 } else {
                                     repository.addNote(
                                         bookId = book.id,
                                         chapterId = chapter.id,
-                                        content = content,
+                                        content = serialized,
                                         starred = starred,
-                                        imagePath = pickedImagePath
+                                        imagePath = ""
                                     )
                                 }
                             } else {
                                 repository.updateNote(
                                     editing.copy(
-                                        content = content,
-                                        imagePath = pickedImagePath,
+                                        content = serialized,
+                                        imagePath = "",
                                         starred = starred
                                     )
                                 )
                             }
                         }
+                        newlyAddedRefs.clear()
                         showAddNote = false
                         editingNote = null
-                        prefilledImagePath = ""
                     },
-                    enabled = content.isNotBlank() || pickedImagePath.isNotBlank(),
+                    enabled = hasContent,
                     modifier = Modifier.testTag("save_note_button")
                 ) { Text("সংরক্ষণ") }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        if (editing == null && pickedImagePath.isNotBlank()) {
-                            repository.deleteUnusedLocalImage(pickedImagePath, sortedNotes)
-                        }
-                        showAddNote = false
-                        editingNote = null
-                        prefilledImagePath = ""
-                    }
-                ) { Text("বাতিল") }
+                TextButton(onClick = { dismissDialogCleanup() }) { Text("বাতিল") }
             }
         )
+
+        if (showDrawingDialog) {
+            DrawingDiagramDialog(
+                onSaveBitmap = { bitmap ->
+                    showDrawingDialog = false
+                    scope.launch {
+                        val savedRef = repository.saveDrawnDiagramBitmap(bitmap)
+                        if (!savedRef.isNullOrBlank()) {
+                            val (updated, afterId) = RichNoteCodec.insertImageAtCursor(blocks.toList(), activeTextBlockId, savedRef)
+                            blocks.clear()
+                            blocks.addAll(updated)
+                            activeTextBlockId = afterId
+                            newlyAddedRefs.add(savedRef)
+                            multipleMode = false
+                        }
+                    }
+                },
+                onDismiss = { showDrawingDialog = false }
+            )
+        }
     }
 
-    if (viewingImageNote != null && viewingImageNote!!.imagePath.isNotBlank()) {
+    if (viewingImage != null) {
         NoteImageViewerDialog(
-            imagePath = viewingImageNote!!.imagePath,
-            title = viewingImageNote!!.content,
-            onDismiss = { viewingImageNote = null }
+            imageFile = viewingImage!!.first.file,
+            title = viewingImage!!.second,
+            onDismiss = { viewingImage = null }
         )
     }
 

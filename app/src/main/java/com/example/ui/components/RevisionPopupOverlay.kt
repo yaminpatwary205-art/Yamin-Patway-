@@ -290,7 +290,10 @@ private fun NotePopupContent(
                 }
             }
 
-            var showFullImage by remember(popup.note.id) { mutableStateOf(false) }
+            var viewingImage by remember(popup.note.id) { mutableStateOf<RichNoteSegment.Image?>(null) }
+            val plainNoteText = remember(popup.note.content) {
+                RichNoteCodec.stripImageMarkers(popup.note.content)
+            }
 
             Text(
                 text = "অধ্যায়: ${popup.chapter.title}",
@@ -298,34 +301,27 @@ private fun NotePopupContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (popup.note.imagePath.isNotBlank()) {
-                NoteAttachmentImagePreview(
-                    imagePath = popup.note.imagePath,
-                    contentDescription = "নোটের চিত্র: ${popup.note.content}",
-                    accentColor = accent,
-                    heightDp = 210,
-                    modifier = Modifier.testTag("popup_note_image_preview"),
-                    onClick = { showFullImage = true }
-                )
-            }
-
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = popup.note.content,
-                    style = MaterialTheme.typography.headlineSmall.copy(lineHeight = 30.sp),
-                    modifier = Modifier.padding(18.dp),
-                    color = MaterialTheme.colorScheme.onSurface
+                RichNoteContentView(
+                    content = popup.note.content,
+                    legacyImagePath = popup.note.imagePath,
+                    accentColor = accent,
+                    textStyle = MaterialTheme.typography.headlineSmall.copy(lineHeight = 30.sp),
+                    textColor = MaterialTheme.colorScheme.onSurface,
+                    imageHeightDp = 210,
+                    onImageClick = { viewingImage = it },
+                    modifier = Modifier.padding(18.dp)
                 )
             }
 
             CopyActionBar(
                 primaryLabel = "টেক্সট কপি করুন",
-                primaryTextToCopy = popup.note.content,
+                primaryTextToCopy = plainNoteText,
                 primaryTestTag = "copy_note_button"
             )
 
@@ -335,11 +331,11 @@ private fun NotePopupContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (showFullImage && popup.note.imagePath.isNotBlank()) {
+            if (viewingImage != null) {
                 NoteImageViewerDialog(
-                    imagePath = popup.note.imagePath,
-                    title = popup.note.content,
-                    onDismiss = { showFullImage = false }
+                    imageFile = viewingImage!!.file,
+                    title = plainNoteText,
+                    onDismiss = { viewingImage = null }
                 )
             }
         }

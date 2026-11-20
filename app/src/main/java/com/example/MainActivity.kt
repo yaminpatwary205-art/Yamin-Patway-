@@ -12,10 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
-import androidx.lifecycle.ViewModelStore
-import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -59,19 +56,14 @@ class MainActivity : ComponentActivity() {
             var localOnlyMode by remember { mutableStateOf(prefs.getBoolean("skip_login", false)) }
 
             LaunchedEffect(Unit) {
-                val explicitSignedOut = prefs.getBoolean("explicit_signed_out", false)
-                if (auth.currentUser == null && !localOnlyMode && !explicitSignedOut) {
+                if (auth.currentUser == null && !localOnlyMode) {
                     val cm = CredentialManager.create(context)
                     attemptAutoSignIn(
                         context = context,
                         credentialManager = cm,
                         scope = scope,
                         onAuthSuccess = {
-                            prefs.edit()
-                                .putBoolean("skip_login", false)
-                                .putBoolean("explicit_signed_out", false)
-                                .apply()
-                            AppDatabase.setActiveUserScope(context, auth.currentUser?.uid)
+                            prefs.edit().putBoolean("skip_login", false).apply()
                             localOnlyMode = false
                         },
                         onUnauthenticated = { }
@@ -83,107 +75,71 @@ class MainActivity : ComponentActivity() {
                 RevisionAlarmTheme {
                     AuthScreen(
                         onAuthSuccess = {
-                            prefs.edit()
-                                .putBoolean("skip_login", false)
-                                .putBoolean("explicit_signed_out", false)
-                                .apply()
-                            AppDatabase.setActiveUserScope(context, auth.currentUser?.uid)
+                            prefs.edit().putBoolean("skip_login", false).apply()
                             localOnlyMode = false
                         },
                         onContinueWithoutLogin = {
-                            prefs.edit()
-                                .putBoolean("skip_login", true)
-                                .putBoolean("explicit_signed_out", false)
-                                .apply()
-                            AppDatabase.setActiveUserScope(context, null)
+                            prefs.edit().putBoolean("skip_login", true).apply()
                             localOnlyMode = true
                         }
                     )
                 }
             } else {
-                val sessionUid = currentUser?.uid
-                val sessionKey = sessionUid ?: "local_only"
-                val sessionStoreOwner = remember(sessionKey) {
-                    object : ViewModelStoreOwner {
-                        override val viewModelStore = ViewModelStore()
-                    }
-                }
+                val sessionKey = currentUser?.uid ?: "local_only"
+                key(sessionKey) {
+                    val vm: RevisionViewModel = viewModel(
+                        key = sessionKey,
+                        factory = viewModelFactory {
+                            initializer {
+                                val app = checkNotNull(this[APPLICATION_KEY])
+                                val dao = AppDatabase.getInstance(app).appDao()
+                                val fsSync = FirestoreSyncRepository(app, dao)
+                                val repo = RevisionRepository(app, dao, fsSync)
+                                RevisionViewModel(app, repo)
+                            }
+                        }
+                    )
 
-                DisposableEffect(sessionKey) {
-                    AppDatabase.setActiveUserScope(context, sessionUid)
-                    if (sessionUid != null) {
-                        prefs.edit()
-                            .putBoolean("skip_login", false)
-                            .putBoolean("explicit_signed_out", false)
-                            .apply()
-                        localOnlyMode = false
+                    LaunchedEffect(currentUser?.uid) {
+                        vm.onUserSessionChanged(currentUser?.uid)
                     }
-                    onDispose {
-                        sessionStoreOwner.viewModelStore.clear()
-                    }
-                }
 
-                CompositionLocalProvider(LocalViewModelStoreOwner provides sessionStoreOwner) {
-                    key(sessionKey) {
-                        val vm: RevisionViewModel = viewModel(
-                            key = sessionKey,
-                            factory = viewModelFactory {
-                                initializer {
-                                    val app = checkNotNull(this[APPLICATION_KEY])
-                                    AppDatabase.setActiveUserScope(app, sessionUid)
-                                    val dao = AppDatabase.getInstanceForUser(app, sessionUid).appDao()
-                                    val fsSync = FirestoreSyncRepository(app, dao)
-                                    val repo = RevisionRepository(app, dao, fsSync, initialUserId = sessionUid)
-                                    RevisionViewModel(app, repo)
+                    LaunchedEffect(pendingAlarmIntent) {
+                        val trigger = pendingAlarmIntent
+                        if (trigger != null) {
+                            vm.handleIncomingNotificationTrigger(trigger.first, trigger.second, trigger.third)
+                            pendingAlarmIntent = null
+                        }
+                    }
+
+                    val state by vm.uiState.collectAsStateWithLifecycle()
+
+                    RevisionAlarmTheme(themeMode = state.stats.themeMode) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            RevisionAlarmNavHost(
+                                vm = vm,
+                                state = state,
+                                currentUser = currentUser,
+                                onSignedOut = {
+                                    prefs.edit().putBoolean("skip_login", false).apply()
+                                    localOnlyMode = false
                                 }
-                            }
-                        )
+                            )
 
-                        LaunchedEffect(sessionKey) {
-                            vm.onUserSessionChanged(sessionUid)
-                        }
-
-                        LaunchedEffect(pendingAlarmIntent) {
-                            val trigger = pendingAlarmIntent
-                            if (trigger != null) {
-                                vm.handleIncomingNotificationTrigger(trigger.first, trigger.second, trigger.third)
-                                pendingAlarmIntent = null
-                            }
-                        }
-
-                        val state by vm.uiState.collectAsStateWithLifecycle()
-
-                        RevisionAlarmTheme(themeMode = state.stats.themeMode) {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                RevisionAlarmNavHost(
-                                    vm = vm,
-                                    state = state,
-                                    currentUser = currentUser,
-                                    onSignedOut = {
-                                        prefs.edit()
-                                            .putBoolean("skip_login", false)
-                                            .putBoolean("explicit_signed_out", true)
-                                            .apply()
-                                        AppDatabase.setActiveUserScope(context, null)
-                                        localOnlyMode = false
+                            state.activePopup?.let { popup ->
+                                RevisionPopupOverlay(
+                                    popup = popup,
+                                    defaultSnoozeMinutes = state.stats.defaultSnoozeMinutes,
+                                    viewModel = vm,
+                                    onToggleNoteStar = { note ->
+                                        scope.launch {
+                                            vm.repository.updateNote(note.copy(starred = !note.starred))
+                                        }
                                     }
                                 )
-
-                                state.activePopup?.let { popup ->
-                                    RevisionPopupOverlay(
-                                        popup = popup,
-                                        defaultSnoozeMinutes = state.stats.defaultSnoozeMinutes,
-                                        viewModel = vm,
-                                        onToggleNoteStar = { note ->
-                                            scope.launch {
-                                                vm.repository.updateNote(note.copy(starred = !note.starred))
-                                            }
-                                        }
-                                    )
-                                }
-
-                                ConfettiBurstOverlay(visible = state.showCelebration)
                             }
+
+                            ConfettiBurstOverlay(visible = state.showCelebration)
                         }
                     }
                 }
