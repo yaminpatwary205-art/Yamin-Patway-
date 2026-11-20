@@ -707,5 +707,106 @@ class RevisionAlarmLogicTest {
         assertFalse(java.io.File(savedPath).exists())
         assertTrue(tempInput.delete())
     }
+
+    @Test
+    fun `different gmail accounts and guest mode have strictly isolated databases and image directories`(): Unit = runBlocking {
+        val uid1 = "gmail_uid_1"
+        val uid2 = "gmail_uid_2"
+
+        val db1 = AppDatabase.getInstanceForUser(context, uid1)
+        val db2 = AppDatabase.getInstanceForUser(context, uid2)
+        val dbLocal = AppDatabase.getInstanceForUser(context, null)
+        try {
+            assertEquals("revision_alarm_u_gmail_uid_1.db", AppDatabase.dbNameForUser(uid1))
+            assertEquals("revision_alarm_u_gmail_uid_2.db", AppDatabase.dbNameForUser(uid2))
+            assertEquals("revision_alarm_local.db", AppDatabase.dbNameForUser(null))
+
+            val fs1 = FirestoreSyncRepository(
+                db = FirebaseFirestore.getInstance(context.getString(R.string.firestore_database_id)),
+                dao = db1.appDao(),
+                auth = FirebaseAuth.getInstance()
+            )
+            val fs2 = FirestoreSyncRepository(
+                db = FirebaseFirestore.getInstance(context.getString(R.string.firestore_database_id)),
+                dao = db2.appDao(),
+                auth = FirebaseAuth.getInstance()
+            )
+            val fsLocal = FirestoreSyncRepository(
+                db = FirebaseFirestore.getInstance(context.getString(R.string.firestore_database_id)),
+                dao = dbLocal.appDao(),
+                auth = FirebaseAuth.getInstance()
+            )
+
+            val repo1 = RevisionRepository(context, db1.appDao(), fs1, initialUserId = uid1)
+            val repo2 = RevisionRepository(context, db2.appDao(), fs2, initialUserId = uid2)
+            val repoLocal = RevisionRepository(context, dbLocal.appDao(), fsLocal, initialUserId = null)
+
+            repo1.ensureSeeded()
+            repo2.ensureSeeded()
+            repoLocal.ensureSeeded()
+
+            // Create temporary image to verify scoped image directories
+            val tempInput = java.io.File(context.cacheDir, "acct_isolation_img.png")
+            val bmp = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+            java.io.FileOutputStream(tempInput).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            bmp.recycle()
+
+            val img1 = repo1.savePickedNoteImage(android.net.Uri.fromFile(tempInput))!!
+            val img2 = repo2.savePickedNoteImage(android.net.Uri.fromFile(tempInput))!!
+            assertTrue(img1.contains("/note_images/u_gmail_uid_1/"))
+            assertTrue(img2.contains("/note_images/u_gmail_uid_2/"))
+            assertNotEquals(img1, img2)
+
+            // Account 1 adds data
+            val bookId = DefaultBooksSeed.books[0].id
+            repo1.addChapter(bookId, "Gmail 1 Chapter")
+            val ch1 = db1.appDao().getAllChaptersOnce().single()
+            repo1.addNote(bookId, ch1.id, "Secret note from Gmail 1", imagePath = img1)
+            repo1.addOrUpdateParagraph(null, "Gmail 1 Para", "Alpha line. Beta line.", 10, false, true)
+            repo1.addVocabList("Gmail 1 Vocab", 15, false, "candid - স্পষ্টভাষী")
+            repo1.saveAlarm(RevisionAlarmEntity(id = "al_u1", title = "Gmail 1 Alarm"))
+
+            // Account 2 starts clean with ZERO leakage from Account 1
+            assertTrue(db2.appDao().getAllChaptersOnce().isEmpty())
+            assertTrue(db2.appDao().getAllNotesOnce().isEmpty())
+            assertTrue(db2.appDao().getAllParagraphsOnce().isEmpty())
+            assertTrue(db2.appDao().getAllVocabListsOnce().isEmpty())
+            assertTrue(db2.appDao().getAllAlarmsOnce().isEmpty())
+
+            // Guest/local mode also starts clean with ZERO leakage
+            assertTrue(dbLocal.appDao().getAllChaptersOnce().isEmpty())
+            assertTrue(dbLocal.appDao().getAllNotesOnce().isEmpty())
+
+            // Account 2 adds its own data
+            repo2.addChapter(bookId, "Gmail 2 Chapter")
+            val ch2 = db2.appDao().getAllChaptersOnce().single()
+            repo2.addNote(bookId, ch2.id, "Note from Gmail 2", imagePath = img2)
+            assertEquals(1, db2.appDao().getAllNotesOnce().size)
+            assertEquals("Note from Gmail 2", db2.appDao().getAllNotesOnce().single().content)
+
+            // Verify Account 1 still has ONLY Account 1 data
+            assertEquals(1, db1.appDao().getAllChaptersOnce().size)
+            assertEquals("Gmail 1 Chapter", db1.appDao().getAllChaptersOnce().single().title)
+            assertEquals(1, db1.appDao().getAllNotesOnce().size)
+            assertEquals("Secret note from Gmail 1", db1.appDao().getAllNotesOnce().single().content)
+
+            // Active scope helper switches background receiver database dynamically
+            AppDatabase.setActiveUserScope(context, uid1)
+            assertEquals("Secret note from Gmail 1", AppDatabase.getInstance(context).appDao().getAllNotesOnce().single().content)
+            AppDatabase.setActiveUserScope(context, uid2)
+            assertEquals("Note from Gmail 2", AppDatabase.getInstance(context).appDao().getAllNotesOnce().single().content)
+
+            repo1.deleteUnusedLocalImage(img1)
+            repo2.deleteUnusedLocalImage(img2)
+            tempInput.delete()
+        } finally {
+            AppDatabase.closeCachedInstance(uid1)
+            AppDatabase.closeCachedInstance(uid2)
+            AppDatabase.closeCachedInstance(null)
+            context.deleteDatabase(AppDatabase.dbNameForUser(uid1))
+            context.deleteDatabase(AppDatabase.dbNameForUser(uid2))
+            context.deleteDatabase(AppDatabase.dbNameForUser(null))
+        }
+    }
 }
 

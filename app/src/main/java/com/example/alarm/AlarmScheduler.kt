@@ -573,6 +573,11 @@ object AlarmScheduler {
         }
     }
 
+    fun cancelAllAlarms(context: Context) {
+        scheduleNextAlarm(context, null)
+        cancelRepeatReminder(context)
+    }
+
     fun generateIcsContent(
         books: List<BookEntity>,
         paragraphs: List<ParagraphFileEntity>,

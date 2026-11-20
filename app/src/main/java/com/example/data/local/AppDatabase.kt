@@ -7,6 +7,10 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.auth
+import java.util.concurrent.ConcurrentHashMap
 
 @Database(
     entities = [
@@ -30,6 +34,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun appDao(): AppDao
 
     companion object {
+        private const val PREFS_NAME = "revision_alarm_prefs"
+        private const val KEY_ACTIVE_DB_USER_ID = "active_db_user_id"
+        private const val KEY_SKIP_LOGIN = "skip_login"
+
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -73,19 +81,73 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        @Volatile
-        private var INSTANCE: AppDatabase? = null
+        private val instances = ConcurrentHashMap<String, AppDatabase>()
 
-        fun getInstance(context: Context): AppDatabase {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
+        fun dbNameForUser(userId: String?): String {
+            val cleanUid = userId?.trim()?.takeIf { it.isNotEmpty() } ?: return "revision_alarm_local.db"
+            val safeUid = cleanUid.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(64)
+            return "revision_alarm_u_$safeUid.db"
+        }
+
+        fun setActiveUserScope(context: Context, userId: String?) {
+            val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val clean = userId?.trim()?.takeIf { it.isNotEmpty() }
+            prefs.edit().apply {
+                if (clean != null) {
+                    putString(KEY_ACTIVE_DB_USER_ID, clean)
+                } else {
+                    remove(KEY_ACTIVE_DB_USER_ID)
+                }
+            }.apply()
+        }
+
+        fun resolveActiveUserId(context: Context): String? {
+            val appContext = context.applicationContext
+            val firebaseUid = if (runCatching { FirebaseApp.getApps(appContext).isNotEmpty() }.getOrDefault(false)) {
+                runCatching { Firebase.auth.currentUser?.uid }.getOrNull()?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
+            if (firebaseUid != null) {
+                setActiveUserScope(appContext, firebaseUid)
+                return firebaseUid
+            }
+            val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getString(KEY_ACTIVE_DB_USER_ID, null)?.takeIf { it.isNotBlank() }
+        }
+
+        fun hasActiveSession(context: Context): Boolean {
+            val appContext = context.applicationContext
+            val signedIn = runCatching {
+                FirebaseApp.getApps(appContext).isNotEmpty() && Firebase.auth.currentUser != null
+            }.getOrDefault(false)
+            if (signedIn) return true
+            val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_SKIP_LOGIN, false)
+        }
+
+        fun getInstanceForUser(context: Context, userId: String?): AppDatabase {
+            val dbName = dbNameForUser(userId)
+            return instances[dbName] ?: synchronized(this) {
+                instances[dbName] ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "revision_alarm.db"
+                    dbName
                 )
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
-                    .also { INSTANCE = it }
+                    .also { instances[dbName] = it }
+            }
+        }
+
+        fun getInstance(context: Context): AppDatabase {
+            return getInstanceForUser(context, resolveActiveUserId(context))
+        }
+
+        internal fun closeCachedInstance(userId: String?) {
+            val dbName = dbNameForUser(userId)
+            synchronized(this) {
+                instances.remove(dbName)?.close()
             }
         }
     }

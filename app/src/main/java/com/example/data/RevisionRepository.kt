@@ -40,9 +40,10 @@ data class ParagraphCheckResult(
 class RevisionRepository(
     private val context: Context,
     val dao: AppDao,
-    private val firestoreSync: FirestoreSyncRepository
+    private val firestoreSync: FirestoreSyncRepository,
+    initialUserId: String? = null
 ) {
-    private var currentUserId: String? = null
+    private var currentUserId: String? = initialUserId?.trim()?.takeIf { it.isNotEmpty() }
 
     val translationService = TranslationService(
         dao = dao,
@@ -112,6 +113,7 @@ class RevisionRepository(
         if (!isOnline()) return Result.success(SyncStatus.OFFLINE)
         val res = firestoreSync.syncBidirectional(uid)
         return if (res.isSuccess) {
+            rescheduleAlarms()
             Result.success(SyncStatus.SYNCED)
         } else {
             Result.success(SyncStatus.ERROR)
@@ -185,8 +187,13 @@ class RevisionRepository(
         }
     }
 
+    private fun userImagesScopeFolder(): String {
+        val uid = currentUserId?.trim()?.takeIf { it.isNotEmpty() } ?: return "local"
+        return "u_" + uid.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(64)
+    }
+
     private fun noteImagesDir(): File {
-        val dir = File(context.filesDir, "note_images")
+        val dir = File(File(context.filesDir, "note_images"), userImagesScopeFolder())
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
