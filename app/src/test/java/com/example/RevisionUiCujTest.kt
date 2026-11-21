@@ -557,6 +557,85 @@ class RevisionUiCujTest {
         imgFile.delete()
     }
 
+    @Test
+    fun `book detail single-click expand collapse all toggles chapters paragraphs and vocab lists`() {
+        val book = DefaultBooksSeed.books[0]
+        val chapter = ChapterEntity("ch_exp_1", book.id, "প্রথম অধ্যায়", 0)
+        val note = NoteEntity("n_exp_1", book.id, chapter.id, "অধ্যায়ের গুরুত্বপূর্ণ নোট")
+        val para = ParagraphFileEntity(
+            id = "p_exp_1",
+            title = "Morning Walk",
+            rawText = "Is morning air fresh? Yes, it feels great! Take a walk.",
+            lines = RevisionRepository.splitParagraphIntoLines("Is morning air fresh? Yes, it feels great! Take a walk.")
+        )
+        val vocabList = VocabListEntity("v_exp_1", "Daily Words")
+        val vocabWord = VocabWordEntity("vw_exp_1", "v_exp_1", "serene", "প্রশান্ত")
+
+        composeRule.setContent {
+            RevisionAlarmTheme {
+                com.example.ui.screens.BookDetailScreen(
+                    book = book,
+                    chapters = listOf(chapter),
+                    notes = listOf(note),
+                    repository = repo,
+                    onBack = {},
+                    onOpenChapter = {},
+                    paragraphs = listOf(para),
+                    vocabLists = listOf(vocabList),
+                    vocabWords = listOf(vocabWord)
+                )
+            }
+        }
+
+        // Initially chapter notes, paragraph lines, and vocab words are collapsed
+        composeRule.onNodeWithTag("book_detail_list").performScrollToNode(hasTestTag("book_toggle_expand_all_button"))
+        composeRule.onNodeWithTag("book_toggle_expand_all_button").assertIsDisplayed()
+        composeRule.onAllNodesWithText("#1. অধ্যায়ের গুরুত্বপূর্ণ নোট").assertCountEquals(0)
+        composeRule.onAllNodesWithText("1. Is morning air fresh?").assertCountEquals(0)
+        composeRule.onAllNodesWithText("• serene — প্রশান্ত").assertCountEquals(0)
+
+        // Single click expands chapters (notes), paragraphs (sentence lines by ?, !, .), and vocab lists (words)
+        composeRule.onNodeWithTag("book_toggle_expand_all_button").performClick()
+
+        composeRule.onNodeWithTag("book_detail_list").performScrollToNode(hasText("#1. অধ্যায়ের গুরুত্বপূর্ণ নোট"))
+        composeRule.onNodeWithText("#1. অধ্যায়ের গুরুত্বপূর্ণ নোট").assertIsDisplayed()
+        composeRule.onNodeWithTag("book_detail_list").performScrollToNode(hasText("1. Is morning air fresh?"))
+        composeRule.onNodeWithText("1. Is morning air fresh?").assertIsDisplayed()
+        composeRule.onNodeWithText("2. Yes, it feels great!").assertIsDisplayed()
+        composeRule.onNodeWithText("3. Take a walk.").assertIsDisplayed()
+        composeRule.onNodeWithTag("book_detail_list").performScrollToNode(hasText("• serene — প্রশান্ত"))
+        composeRule.onNodeWithText("• serene — প্রশান্ত").assertIsDisplayed()
+
+        // Second click collapses all expanded sections and items
+        composeRule.onNodeWithTag("book_top_expand_all_button").performClick()
+        composeRule.onAllNodesWithText("#1. অধ্যায়ের গুরুত্বপূর্ণ নোট").assertCountEquals(0)
+        composeRule.onAllNodesWithText("1. Is morning air fresh?").assertCountEquals(0)
+        composeRule.onAllNodesWithText("• serene — প্রশান্ত").assertCountEquals(0)
+    }
+
+    @Test
+    fun `chapter detail note composer shows live 10000 word counter`() {
+        val book = DefaultBooksSeed.books[0]
+        val chapter = ChapterEntity("ch_wc_1", book.id, "শব্দ অধ্যায়", 0)
+        runBlocking { dao.upsertChapter(chapter) }
+
+        composeRule.setContent {
+            RevisionAlarmTheme {
+                ChapterDetailScreen(
+                    book = book,
+                    chapter = chapter,
+                    allChaptersInBook = listOf(chapter),
+                    notes = emptyList(),
+                    repository = repo,
+                    onBack = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("add_note_fab").performClick()
+        composeRule.onNodeWithTag("note_word_count_label").assertTextEquals("শব্দ সংখ্যা: 0 / ১০,০০০ শব্দ")
+    }
+
     private fun contrastRatio(fg: androidx.compose.ui.graphics.Color, bg: androidx.compose.ui.graphics.Color): Double {
         fun lum(c: androidx.compose.ui.graphics.Color): Double {
             fun ch(v: Float): Double {

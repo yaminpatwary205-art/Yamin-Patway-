@@ -510,7 +510,7 @@ class FirestoreSyncRepository(
 }
 
 fun BookEntity.toFsMap(): Map<String, Any> = mapOf(
-    "title" to title.trim().ifBlank { "Untitled" }.take(120),
+    "title" to title.trim().ifBlank { "Untitled" }.take(250),
     "colorHex" to colorHex.take(12),
     "iconKey" to iconKey.take(40),
     "sortOrder" to sortOrder.coerceIn(0, 100),
@@ -525,7 +525,7 @@ fun BookEntity.toFsMap(): Map<String, Any> = mapOf(
 
 fun ChapterEntity.toFsMap(): Map<String, Any> = mapOf(
     "bookId" to bookId,
-    "title" to title.trim().ifBlank { "অধ্যায়" }.take(120),
+    "title" to title.trim().ifBlank { "অধ্যায়" }.take(250),
     "sortOrder" to sortOrder.coerceIn(0, 10000),
     "overrideEnabled" to overrideEnabled.coerceIn(-1, 1),
     "overrideIntervalMinutes" to overrideIntervalMinutes.coerceIn(0, 1440),
@@ -538,7 +538,7 @@ fun ChapterEntity.toFsMap(): Map<String, Any> = mapOf(
 fun NoteEntity.toFsMap(): Map<String, Any> = mapOf(
     "bookId" to bookId,
     "chapterId" to chapterId,
-    "content" to content.trim().ifBlank { "-" }.take(5000),
+    "content" to content.trim().ifBlank { "-" }.take(250000),
     "starred" to starred,
     "overrideEnabled" to overrideEnabled.coerceIn(-1, 1),
     "overrideIntervalMinutes" to overrideIntervalMinutes.coerceIn(0, 1440),
@@ -549,10 +549,10 @@ fun NoteEntity.toFsMap(): Map<String, Any> = mapOf(
 )
 
 fun ParagraphFileEntity.toFsMap(): Map<String, Any> = mapOf(
-    "title" to title.trim().ifBlank { "Paragraph" }.take(160),
-    "rawText" to rawText.trim().ifBlank { "-" }.take(15000),
-    "lines" to lines.take(300).ifEmpty { listOf("-") },
-    "currentLineIndex" to currentLineIndex.coerceIn(0, 300),
+    "title" to title.trim().ifBlank { "Paragraph" }.take(250),
+    "rawText" to rawText.trim().ifBlank { "-" }.take(100000),
+    "lines" to lines.take(1500).ifEmpty { listOf("-") },
+    "currentLineIndex" to currentLineIndex.coerceIn(0, 1500),
     "enabled" to enabled,
     "intervalMinutes" to intervalMinutes.coerceIn(1, 1440),
     "memoryMode" to memoryMode,
@@ -561,7 +561,7 @@ fun ParagraphFileEntity.toFsMap(): Map<String, Any> = mapOf(
 )
 
 fun VocabListEntity.toFsMap(): Map<String, Any> = mapOf(
-    "title" to title.trim().ifBlank { "Word List" }.take(160),
+    "title" to title.trim().ifBlank { "Word List" }.take(250),
     "enabled" to enabled,
     "intervalMinutes" to intervalMinutes.coerceIn(1, 1440),
     "reverseMode" to reverseMode,
@@ -573,7 +573,7 @@ fun VocabListEntity.toFsMap(): Map<String, Any> = mapOf(
 fun VocabWordEntity.toFsMap(): Map<String, Any> = mapOf(
     "listId" to listId,
     "word" to word.trim().ifBlank { "word" }.take(120),
-    "meaningBn" to meaningBn.take(300),
+    "meaningBn" to meaningBn.take(1000),
     "enabled" to enabled,
     "mastered" to mastered,
     "weakCount" to weakCount.coerceAtLeast(0),
@@ -584,7 +584,7 @@ fun VocabWordEntity.toFsMap(): Map<String, Any> = mapOf(
 
 fun WeakWordEntity.toFsMap(): Map<String, Any> = mapOf(
     "word" to word.trim().ifBlank { "word" }.take(120),
-    "meaningBn" to meaningBn.take(300),
+    "meaningBn" to meaningBn.take(1000),
     "sourceType" to if (sourceType == "paragraph") "paragraph" else "vocab",
     "mistakeCount" to mistakeCount.coerceAtLeast(1),
     "lastMistakeEpochMs" to lastMistakeEpochMs.coerceAtLeast(0L),
@@ -592,9 +592,9 @@ fun WeakWordEntity.toFsMap(): Map<String, Any> = mapOf(
 )
 
 fun TranslationCacheEntity.toFsMap(): Map<String, Any> = mapOf(
-    "sourceText" to sourceText.trim().take(1000),
+    "sourceText" to sourceText.trim().take(5000),
     "sourceLang" to sourceLang.take(10),
     "targetLang" to targetLang.take(10),
-    "translatedText" to translatedText.trim().take(2000),
+    "translatedText" to translatedText.trim().take(10000),
     "updatedAtEpochMs" to updatedAtEpochMs.coerceAtLeast(0L)
 )

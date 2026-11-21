@@ -89,13 +89,13 @@ class RevisionRepository(
         if (stats == null) {
             dao.upsertUserStats(UserStatsEntity(todayDate = todayDayString()))
         }
-        // Re-split any legacy paragraphs stored as a single oversized line
+        // Re-split paragraphs so saved lines stay aligned with sentence punctuation rules
         val existingParas = dao.getAllParagraphsOnce()
         val fixedParas = existingParas.mapNotNull { p ->
-            val cleanLines = splitParagraphIntoLines(p.rawText)
-            if (cleanLines.isNotEmpty() && (p.lines.size <= 1 && cleanLines.size > 1 || p.lines.any { it.length > 120 })) {
+            val cleanLines = splitParagraphIntoLines(p.rawText).take(1500)
+            if (cleanLines.isNotEmpty() && p.lines != cleanLines) {
                 p.copy(
-                    lines = cleanLines.take(300),
+                    lines = cleanLines,
                     currentLineIndex = p.currentLineIndex.coerceIn(0, cleanLines.lastIndex)
                 )
             } else {
@@ -126,7 +126,7 @@ class RevisionRepository(
         val old = dao.getBookById(book.id)
         val scheduleChanged = old != null && (old.intervalMinutes != book.intervalMinutes || (!old.enabled && book.enabled))
         val updated = book.copy(
-            title = book.title.trim().ifBlank { "Untitled" }.take(120),
+            title = book.title.trim().ifBlank { "Untitled" }.take(250),
             lastTriggeredEpochMs = if (scheduleChanged) now else book.lastTriggeredEpochMs,
             updatedAtEpochMs = now
         )
@@ -145,7 +145,7 @@ class RevisionRepository(
         val chapter = ChapterEntity(
             id = newId("ch"),
             bookId = bookId,
-            title = clean.take(120),
+            title = clean.take(250),
             sortOrder = maxOrder,
             updatedAtEpochMs = System.currentTimeMillis()
         )
@@ -164,7 +164,7 @@ class RevisionRepository(
                 (old.overrideEnabled != 1 && chapter.overrideEnabled == 1)
             )
         val updated = chapter.copy(
-            title = chapter.title.trim().ifBlank { "অধ্যায়" }.take(120),
+            title = chapter.title.trim().ifBlank { "অধ্যায়" }.take(250),
             lastTriggeredEpochMs = if (scheduleChanged) now else chapter.lastTriggeredEpochMs,
             updatedAtEpochMs = now
         )
@@ -300,7 +300,7 @@ class RevisionRepository(
             id = newId("nt"),
             bookId = bookId,
             chapterId = chapterId,
-            content = finalContent.take(10000),
+            content = RichNoteCodec.trimContentToNoteLimit(finalContent),
             imagePath = cleanImage,
             starred = starred,
             sortOrder = maxOf(nextOrder, existingInChapter.size),
@@ -328,7 +328,7 @@ class RevisionRepository(
                 id = newId("nt"),
                 bookId = bookId,
                 chapterId = chapterId,
-                content = line.take(5000),
+                content = RichNoteCodec.trimContentToNoteLimit(line),
                 starred = starred,
                 sortOrder = baseOrder + idx,
                 updatedAtEpochMs = now + idx
@@ -352,7 +352,7 @@ class RevisionRepository(
         val hasAnyImage = cleanImage.isNotBlank() || RichNoteCodec.extractImageRefs(note.content).isNotEmpty()
         val fallbackContent = if (hasAnyImage) "চিত্র নোট" else "-"
         val updated = note.copy(
-            content = note.content.trim().ifBlank { fallbackContent }.take(10000),
+            content = RichNoteCodec.trimContentToNoteLimit(note.content.trim().ifBlank { fallbackContent }),
             imagePath = cleanImage,
             lastTriggeredEpochMs = if (scheduleChanged) now else note.lastTriggeredEpochMs,
             updatedAtEpochMs = now
@@ -513,16 +513,16 @@ class RevisionRepository(
         memoryMode: Boolean,
         enabled: Boolean
     ) {
-        val lines = splitParagraphIntoLines(rawText)
+        val lines = splitParagraphIntoLines(rawText).take(1500)
         if (lines.isEmpty()) return
         val now = System.currentTimeMillis()
         val old = if (existingId != null) dao.getParagraphById(existingId) else null
         val scheduleChanged = old != null && (old.intervalMinutes != intervalMinutes || (!old.enabled && enabled))
         val entity = ParagraphFileEntity(
             id = existingId ?: newId("pr"),
-            title = title.trim().ifBlank { "Untitled Paragraph" }.take(160),
-            rawText = rawText.trim().take(15000),
-            lines = lines.take(300),
+            title = title.trim().ifBlank { "Untitled Paragraph" }.take(250),
+            rawText = rawText.trim().take(100000),
+            lines = lines,
             currentLineIndex = (old?.currentLineIndex ?: 0).coerceIn(0, lines.lastIndex),
             enabled = enabled,
             intervalMinutes = intervalMinutes.coerceIn(1, 1440),
@@ -583,7 +583,7 @@ class RevisionRepository(
     suspend fun addVocabList(title: String, intervalMinutes: Int, reverseMode: Boolean, rawBulkWords: String) {
         val list = VocabListEntity(
             id = newId("vl"),
-            title = title.trim().ifBlank { "Vocabulary List" }.take(160),
+            title = title.trim().ifBlank { "Vocabulary List" }.take(250),
             enabled = true,
             intervalMinutes = intervalMinutes.coerceIn(1, 1440),
             reverseMode = reverseMode,
@@ -642,7 +642,7 @@ class RevisionRepository(
                 id = newId("vw"),
                 listId = listId,
                 word = w.take(120),
-                meaningBn = m.take(300),
+                meaningBn = m.take(1000),
                 enabled = true,
                 updatedAtEpochMs = now
             )
@@ -657,7 +657,7 @@ class RevisionRepository(
     suspend fun updateVocabWord(word: VocabWordEntity) {
         val updated = word.copy(
             word = word.word.trim().take(120),
-            meaningBn = word.meaningBn.trim().take(300),
+            meaningBn = word.meaningBn.trim().take(1000),
             updatedAtEpochMs = System.currentTimeMillis()
         )
         dao.upsertVocabWord(updated)
@@ -723,7 +723,7 @@ class RevisionRepository(
         val entity = WeakWordEntity(
             id = id,
             word = clean.take(120),
-            meaningBn = meaningBn.ifBlank { existing?.meaningBn.orEmpty() }.take(300),
+            meaningBn = meaningBn.ifBlank { existing?.meaningBn.orEmpty() }.take(1000),
             sourceType = if (sourceType == "paragraph") "paragraph" else "vocab",
             mistakeCount = (existing?.mistakeCount ?: 0) + 1,
             lastMistakeEpochMs = now,
@@ -1200,19 +1200,62 @@ class RevisionRepository(
                 .trim()
             if (normalized.isEmpty()) return emptyList()
 
-            // First split on explicit newlines, sentence terminators (. ! ? । ;), even when space after period was omitted
-            val rawSentences = normalized
-                .split(Regex("\\n+|(?<=[.!?।;])(?:\\s+|(?=[A-Za-z0-9\"'(]))"))
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
+            val rawSentences = mutableListOf<String>()
+            val buf = StringBuilder()
+            val n = normalized.length
+            var i = 0
+            while (i < n) {
+                val ch = normalized[i]
+                if (ch == '\n') {
+                    val s = buf.toString().trim()
+                    if (s.isNotEmpty()) rawSentences += s
+                    buf.clear()
+                    i++
+                    continue
+                }
+
+                buf.append(ch)
+                val isEndPunct = ch == '.' || ch == '?' || ch == '!' || ch == '।'
+                if (isEndPunct) {
+                    val prev = if (i > 0) normalized[i - 1] else ' '
+                    val next = if (i + 1 < n) normalized[i + 1] else ' '
+                    // Keep decimals like 3.14 together
+                    val isDecimal = ch == '.' && prev.isDigit() && next.isDigit()
+                    if (!isDecimal) {
+                        // Consume consecutive sentence terminators (e.g. ..., ?!, !!)
+                        while (i + 1 < n && (normalized[i + 1] == '.' || normalized[i + 1] == '?' || normalized[i + 1] == '!' || normalized[i + 1] == '।')) {
+                            i++
+                            buf.append(normalized[i])
+                        }
+                        // Consume closing quotes/brackets attached to sentence ending
+                        while (i + 1 < n && normalized[i + 1] in charArrayOf('"', '\'', '’', '”', ')', ']')) {
+                            i++
+                            buf.append(normalized[i])
+                        }
+                        val after = if (i + 1 < n) normalized[i + 1] else ' '
+                        val startsNewSentence = after.isWhitespace() || after.isLetterOrDigit() || after == '"' || after == '\'' || after == '(' || after == '“'
+                        if (startsNewSentence) {
+                            val s = buf.toString().trim()
+                            if (s.isNotEmpty()) rawSentences += s
+                            buf.clear()
+                            while (i + 1 < n && normalized[i + 1] == ' ') {
+                                i++
+                            }
+                        }
+                    }
+                }
+                i++
+            }
+            val tail = buf.toString().trim()
+            if (tail.isNotEmpty()) rawSentences += tail
 
             val result = mutableListOf<String>()
-            val maxChars = 90
-            val maxWords = 14
+            val maxUnpunctuatedChars = 90
+            val maxUnpunctuatedWords = 14
 
-            fun appendChunkedByWords(segment: String) {
+            fun appendChunkedUnpunctuated(segment: String) {
                 val words = segment.split(Regex("\\s+")).filter { it.isNotBlank() }
-                if (words.size <= maxWords && segment.length <= maxChars) {
+                if (words.size <= maxUnpunctuatedWords && segment.length <= maxUnpunctuatedChars) {
                     result += segment
                     return
                 }
@@ -1220,7 +1263,7 @@ class RevisionRepository(
                 var wordCount = 0
                 for (w in words) {
                     val candidateLen = if (current.isEmpty()) w.length else current.length + 1 + w.length
-                    if (current.isNotEmpty() && (candidateLen > maxChars || wordCount >= maxWords)) {
+                    if (current.isNotEmpty() && (candidateLen > maxUnpunctuatedChars || wordCount >= maxUnpunctuatedWords)) {
                         result += current.toString()
                         current.clear()
                         wordCount = 0
@@ -1233,17 +1276,14 @@ class RevisionRepository(
             }
 
             for (sentence in rawSentences) {
-                if (sentence.length <= maxChars && sentence.split(Regex("\\s+")).size <= maxWords) {
+                val lastCoreChar = sentence.trimEnd('"', '\'', '’', '”', ')', ']').lastOrNull()
+                val endsWithSentencePunct = lastCoreChar != null &&
+                    (lastCoreChar == '.' || lastCoreChar == '?' || lastCoreChar == '!' || lastCoreChar == '।')
+                if (endsWithSentencePunct) {
+                    // Keep complete punctuated sentences intact as one line
                     result += sentence
                 } else {
-                    // Break long sentences cleanly at commas/colons first, then by word budget
-                    val clauses = sentence
-                        .split(Regex("(?<=[,:])\\s+"))
-                        .map { it.trim() }
-                        .filter { it.isNotBlank() }
-                    for (clause in clauses) {
-                        appendChunkedByWords(clause)
-                    }
+                    appendChunkedUnpunctuated(sentence)
                 }
             }
             return result

@@ -212,6 +212,81 @@ object RichNoteCodec {
         return current to afterId
     }
 
+    const val MAX_NOTE_WORDS = 10_000
+    const val MAX_NOTE_CHARS = 250_000
+
+    fun countWords(content: String): Int {
+        val plain = IMG_REGEX.replace(content, " ").trim()
+        if (plain.isEmpty()) return 0
+        return plain.split(Regex("\\s+")).count { it.isNotBlank() }
+    }
+
+    fun trimContentToNoteLimit(
+        content: String,
+        maxWords: Int = MAX_NOTE_WORDS,
+        maxChars: Int = MAX_NOTE_CHARS
+    ): String {
+        val trimmed = content.trim()
+        if (trimmed.isEmpty()) return ""
+        val sb = StringBuilder()
+        var wordCount = 0
+        var i = 0
+        val n = trimmed.length
+        while (i < n && sb.length < maxChars) {
+            if (trimmed.startsWith("[[IMG:", i)) {
+                val close = trimmed.indexOf("]]", i + 6)
+                if (close > i) {
+                    val token = trimmed.substring(i, close + 2)
+                    if (sb.length + token.length <= maxChars) {
+                        sb.append(token)
+                    }
+                    i = close + 2
+                    continue
+                }
+            }
+            val ch = trimmed[i]
+            if (ch.isWhitespace()) {
+                sb.append(ch)
+                i++
+            } else {
+                var end = i + 1
+                while (end < n && !trimmed[end].isWhitespace() && !trimmed.startsWith("[[IMG:", end)) {
+                    end++
+                }
+                if (wordCount >= maxWords) {
+                    // Still preserve any trailing [[IMG:...]] markers even if text reached word cap
+                    var scan = end
+                    while (scan < n) {
+                        if (trimmed.startsWith("[[IMG:", scan)) {
+                            val close = trimmed.indexOf("]]", scan + 6)
+                            if (close > scan) {
+                                val marker = trimmed.substring(scan, close + 2)
+                                if (sb.length + marker.length + 1 <= maxChars) {
+                                    if (sb.isNotEmpty() && !sb.last().isWhitespace()) sb.append('\n')
+                                    sb.append(marker)
+                                }
+                                scan = close + 2
+                                continue
+                            }
+                        }
+                        scan++
+                    }
+                    break
+                }
+                val word = trimmed.substring(i, end)
+                val remainingChars = maxChars - sb.length
+                if (word.length <= remainingChars) {
+                    sb.append(word)
+                } else {
+                    sb.append(word.take(remainingChars))
+                }
+                wordCount++
+                i = end
+            }
+        }
+        return sb.toString().trim()
+    }
+
     fun serializeBlocks(blocks: List<NoteEditorBlock>): String {
         val parts = mutableListOf<String>()
         for (block in blocks) {
@@ -226,7 +301,7 @@ object RichNoteCodec {
                 }
             }
         }
-        return parts.joinToString("\n").take(10000)
+        return trimContentToNoteLimit(parts.joinToString("\n"))
     }
 
     fun newBlockId(): String = "blk_" + UUID.randomUUID().toString().replace("-", "").take(10)

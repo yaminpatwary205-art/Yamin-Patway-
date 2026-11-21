@@ -395,7 +395,7 @@ class RevisionViewModel(
         val stats = uiState.value.stats
         audioManager.startAlarmFeedback(stats.soundEnabled, stats.alarmVolume, stats.vibrationEnabled)
         val resplit = RevisionRepository.splitParagraphIntoLines(para.rawText)
-        val effectiveLines = if (resplit.size > 1 && (para.lines.size <= 1 || para.lines.any { it.length > 120 })) {
+        val effectiveLines = if (resplit.isNotEmpty() && para.lines != resplit) {
             resplit
         } else {
             para.lines.ifEmpty { resplit }

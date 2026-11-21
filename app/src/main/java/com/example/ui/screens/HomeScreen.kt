@@ -880,6 +880,9 @@ private fun ParagraphPracticeSection(
     onPracticeNow: (ParagraphFileEntity) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    var expandedParaIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val allExpanded = paragraphs.isNotEmpty() && expandedParaIds.containsAll(paragraphs.map { it.id })
+
     if (paragraphs.isEmpty()) {
         GlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -890,7 +893,7 @@ private fun ParagraphPracticeSection(
                 Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
                 Text("ইংরেজি প্যারাগ্রাফ বা কম্পোজিশন যোগ করুন", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "বড় প্যারাগ্রাফ পেস্ট করলে অ্যাপ এক লাইন এক লাইন করে ভাগ করবে এবং প্রতিবার অ্যালার্মে মাত্র ১টি লাইন দেখাবে (কপি বাটন সহ)।",
+                    "বড় প্যারাগ্রাফ পেস্ট করলে অ্যাপ বাক্য শেষের চিহ্ন (., !, ?) অনুযায়ী লাইন আলাদা করবে এবং প্রতিবার অ্যালার্মে ১টি করে বাক্য দেখাবে।",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -898,11 +901,51 @@ private fun ParagraphPracticeSection(
         }
     } else {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 96.dp)) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "সব প্যারাগ্রাফ (${paragraphs.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    FilledTonalButton(
+                        onClick = {
+                            expandedParaIds = if (allExpanded) emptySet() else paragraphs.map { it.id }.toSet()
+                        },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("paragraphs_toggle_expand_all_button")
+                    ) {
+                        Icon(
+                            if (allExpanded) Icons.Rounded.UnfoldLess else Icons.Rounded.UnfoldMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (allExpanded) "সব গুটিয়ে নিন" else "সব লাইন খুলুন", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+
             items(paragraphs, key = { it.id }) { para ->
-                val total = para.lines.size.coerceAtLeast(1)
+                val sentenceLines = remember(para.rawText) {
+                    RevisionRepository.splitParagraphIntoLines(para.rawText).ifEmpty { para.lines }
+                }
+                val total = sentenceLines.size.coerceAtLeast(1)
                 val current = (para.currentLineIndex + 1).coerceAtMost(total)
                 val progress = current.toFloat() / total
-                GlassCard(accentColor = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth()) {
+                val isExpanded = para.id in expandedParaIds
+
+                GlassCard(
+                    accentColor = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        expandedParaIds = if (isExpanded) expandedParaIds - para.id else expandedParaIds + para.id
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag("paragraph_card_${para.id}")
+                ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -917,17 +960,52 @@ private fun ParagraphPracticeSection(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Switch(
-                                checked = para.enabled,
-                                onCheckedChange = { en ->
-                                    scope.launch { repository.updateParagraph(para.copy(enabled = en)) }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = {
+                                        expandedParaIds = if (isExpanded) expandedParaIds - para.id else expandedParaIds + para.id
+                                    },
+                                    modifier = Modifier.testTag("paragraph_expand_${para.id}")
+                                ) {
+                                    Icon(
+                                        if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                        contentDescription = if (isExpanded) "লাইন লুকান" else "লাইন দেখুন"
+                                    )
                                 }
-                            )
+                                Switch(
+                                    checked = para.enabled,
+                                    onCheckedChange = { en ->
+                                        scope.launch { repository.updateParagraph(para.copy(enabled = en)) }
+                                    }
+                                )
+                            }
                         }
                         LinearProgressIndicator(
                             progress = { progress },
                             modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50))
                         )
+                        AnimatedVisibility(visible = isExpanded) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                                modifier = Modifier.fillMaxWidth().testTag("paragraph_lines_box_${para.id}")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    sentenceLines.forEachIndexed { idx, line ->
+                                        val isCurrent = idx == para.currentLineIndex.coerceIn(0, (sentenceLines.size - 1).coerceAtLeast(0))
+                                        Text(
+                                            text = "${idx + 1}. $line",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -963,6 +1041,9 @@ private fun VocabularySection(
     onPracticeNow: (VocabListEntity) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    var expandedListIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val allExpanded = lists.isNotEmpty() && expandedListIds.containsAll(lists.map { it.id })
+
     if (lists.isEmpty()) {
         GlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -981,15 +1062,45 @@ private fun VocabularySection(
         }
     } else {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 96.dp)) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "ভোকাবুলারি তালিকা (${lists.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    FilledTonalButton(
+                        onClick = {
+                            expandedListIds = if (allExpanded) emptySet() else lists.map { it.id }.toSet()
+                        },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("vocab_toggle_expand_all_button")
+                    ) {
+                        Icon(
+                            if (allExpanded) Icons.Rounded.UnfoldLess else Icons.Rounded.UnfoldMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (allExpanded) "সব গুটিয়ে নিন" else "সব শব্দ খুলুন", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+
             items(lists, key = { it.id }) { list ->
                 val listWords = words.filter { it.listId == list.id }
                 val mastered = listWords.count { it.mastered }
                 val weak = listWords.count { it.weakCount > 0 }
+                val isExpanded = list.id in expandedListIds
 
                 GlassCard(
                     accentColor = Color(0xFF7C3AED),
                     onClick = { onOpenList(list.id) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("vocab_card_${list.id}")
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
@@ -1005,13 +1116,56 @@ private fun VocabularySection(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Switch(
-                                checked = list.enabled,
-                                onCheckedChange = { en ->
-                                    scope.launch { repository.updateVocabList(list.copy(enabled = en)) }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = {
+                                        expandedListIds = if (isExpanded) expandedListIds - list.id else expandedListIds + list.id
+                                    },
+                                    modifier = Modifier.testTag("vocab_expand_${list.id}")
+                                ) {
+                                    Icon(
+                                        if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                        contentDescription = if (isExpanded) "শব্দ লুকান" else "শব্দ দেখুন"
+                                    )
                                 }
-                            )
+                                Switch(
+                                    checked = list.enabled,
+                                    onCheckedChange = { en ->
+                                        scope.launch { repository.updateVocabList(list.copy(enabled = en)) }
+                                    }
+                                )
+                            }
                         }
+
+                        AnimatedVisibility(visible = isExpanded) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                                modifier = Modifier.fillMaxWidth().testTag("vocab_words_box_${list.id}")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (listWords.isEmpty()) {
+                                        Text(
+                                            "কোনো শব্দ যোগ করা হয়নি",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    } else {
+                                        listWords.forEach { w ->
+                                            Text(
+                                                text = if (w.meaningBn.isNotBlank()) "• ${w.word} — ${w.meaningBn}" else "• ${w.word}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,

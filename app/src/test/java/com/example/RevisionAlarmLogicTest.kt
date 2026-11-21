@@ -7,6 +7,7 @@ import com.example.alarm.AlarmScheduler
 import com.example.data.RevisionRepository
 import com.example.data.local.*
 import com.example.data.remote.FirestoreSyncRepository
+import com.example.data.remote.toFsMap
 import com.example.translation.TranslationOutcome
 import com.example.translation.TranslationService
 import com.google.firebase.FirebaseApp
@@ -773,5 +774,77 @@ class RevisionAlarmLogicTest {
         repo.deleteUnusedLocalImage(drawnRef)
         assertFalse(drawnFile.exists())
     }
+
+    @Test
+    fun `expanded text limits preserve long notes over 25k chars and paragraphs over 450 lines`() = runBlocking {
+        repo.ensureSeeded()
+        val book = DefaultBooksSeed.books[0]
+        repo.addChapter(book.id, "দীর্ঘ অধ্যায়")
+        val chapter = dao.getAllChaptersOnce().single()
+
+        val longNoteText = "ক".repeat(25_000)
+        repo.addNote(book.id, chapter.id, longNoteText)
+        val savedNote = dao.getAllNotesOnce().single()
+        assertEquals(25_000, savedNote.content.length)
+        val noteFsContent = savedNote.toFsMap()["content"] as String
+        assertEquals(25_000, noteFsContent.length)
+
+        val longParagraph = (1..500).joinToString(" ") { "Sentence number $it is complete." }
+        assertTrue(longParagraph.length > 15_000)
+        repo.addOrUpdateParagraph(
+            existingId = null,
+            title = "Long Essay",
+            rawText = longParagraph,
+            intervalMinutes = 15,
+            memoryMode = false,
+            enabled = true
+        )
+        val savedPara = dao.getAllParagraphsOnce().single()
+        assertEquals(longParagraph.length, savedPara.rawText.length)
+        assertEquals(500, savedPara.lines.size)
+        val paraFsRaw = savedPara.toFsMap()["rawText"] as String
+        @Suppress("UNCHECKED_CAST")
+        val paraFsLines = savedPara.toFsMap()["lines"] as List<String>
+        assertEquals(longParagraph.length, paraFsRaw.length)
+        assertEquals(500, paraFsLines.size)
+    }
+
+    @Test
+    fun `note limit supports 10000 words while capping over 10000 and preserving image markers`() = runBlocking {
+        repo.ensureSeeded()
+        val book = DefaultBooksSeed.books[0]
+        repo.addChapter(book.id, "বৃহৎ নোট অধ্যায়")
+        val chapter = dao.getAllChaptersOnce().single()
+
+        val exact10kWords = (1..10_000).joinToString(" ") { "word$it" }
+        assertEquals(10_000, com.example.ui.components.RichNoteCodec.countWords(exact10kWords))
+        repo.addNote(book.id, chapter.id, "$exact10kWords\n[[IMG:diagram_end.png]]")
+        val saved10k = dao.getAllNotesOnce().single()
+        assertEquals(10_000, com.example.ui.components.RichNoteCodec.countWords(saved10k.content))
+        assertTrue(saved10k.content.contains("word10000"))
+        assertTrue(saved10k.content.contains("[[IMG:diagram_end.png]]"))
+
+        val overLimitWords = (1..10_250).joinToString(" ") { "item$it" }
+        val trimmed = com.example.ui.components.RichNoteCodec.trimContentToNoteLimit(overLimitWords)
+        assertEquals(10_000, com.example.ui.components.RichNoteCodec.countWords(trimmed))
+        assertTrue(trimmed.contains("item10000"))
+        assertFalse(trimmed.contains("item10001"))
+    }
+
+    @Test
+    fun `paragraph sentence splitter breaks cleanly on question exclamation period and decimals`() {
+        val longCommasSentence = "When we walk through the quiet green morning forest, listening to birds, feeling the cool breeze, and watching sunlight filter through tall trees, how does nature make you feel?"
+        val input = "$longCommasSentence What a peaceful view! The temperature was 3.14 degrees. \"Ready?\" she asked."
+
+        val lines = RevisionRepository.splitParagraphIntoLines(input)
+
+        assertEquals(5, lines.size)
+        assertEquals(longCommasSentence, lines[0])
+        assertEquals("What a peaceful view!", lines[1])
+        assertEquals("The temperature was 3.14 degrees.", lines[2])
+        assertEquals("\"Ready?\"", lines[3])
+        assertEquals("she asked.", lines[4])
+    }
 }
+
 

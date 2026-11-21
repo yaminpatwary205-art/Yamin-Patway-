@@ -196,7 +196,13 @@ private fun RevisionAlarmNavHost(
                     notes = bookNotes,
                     repository = vm.repository,
                     onBack = { navController.popBackStack() },
-                    onOpenChapter = { chapterId -> navController.navigate("chapter/$bookId/$chapterId") }
+                    onOpenChapter = { chapterId -> navController.navigate("chapter/$bookId/$chapterId") },
+                    paragraphs = state.paragraphs,
+                    vocabLists = state.vocabLists,
+                    vocabWords = state.vocabWords,
+                    onOpenVocabList = { listId -> navController.navigate("vocab/$listId") },
+                    onPracticeParagraph = { para -> vm.launchParagraphNow(para) },
+                    onPracticeVocab = { list -> vm.launchVocabListNow(list) }
                 )
             } else if (state.books.isNotEmpty()) {
                 LaunchedEffect(bookId) { navController.popBackStack() }

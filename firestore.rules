@@ -55,7 +55,7 @@ service cloud.firestore {
 
     function isValidBook(data, userId) {
       return data.userId == userId &&
-             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 250 &&
              data.colorHex is string && data.colorHex.size() >= 4 && data.colorHex.size() <= 12 &&
              data.iconKey is string && data.iconKey.size() >= 1 && data.iconKey.size() <= 40 &&
              data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 100 &&
@@ -71,7 +71,7 @@ service cloud.firestore {
     function isValidChapter(data, userId) {
       return data.userId == userId &&
              isValidId(data.bookId) &&
-             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 250 &&
              data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 10000 &&
              data.overrideEnabled is int && data.overrideEnabled >= -1 && data.overrideEnabled <= 1 &&
              data.overrideIntervalMinutes is int && data.overrideIntervalMinutes >= 0 && data.overrideIntervalMinutes <= 1440 &&
@@ -85,7 +85,7 @@ service cloud.firestore {
       return data.userId == userId &&
              isValidId(data.bookId) &&
              isValidId(data.chapterId) &&
-             data.content is string && data.content.size() >= 1 && data.content.size() <= 5000 &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 250000 &&
              data.starred is bool &&
              data.overrideEnabled is int && data.overrideEnabled >= -1 && data.overrideEnabled <= 1 &&
              data.overrideIntervalMinutes is int && data.overrideIntervalMinutes >= 0 && data.overrideIntervalMinutes <= 1440 &&
@@ -97,11 +97,11 @@ service cloud.firestore {
 
     function isValidParagraphFile(data, userId) {
       return data.userId == userId &&
-             data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
-             data.rawText is string && data.rawText.size() >= 1 && data.rawText.size() <= 15000 &&
-             data.lines is list && data.lines.size() >= 1 && data.lines.size() <= 300 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 250 &&
+             data.rawText is string && data.rawText.size() >= 1 && data.rawText.size() <= 100000 &&
+             data.lines is list && data.lines.size() >= 1 && data.lines.size() <= 1500 &&
              data.lines[0] is string &&
-             data.currentLineIndex is int && data.currentLineIndex >= 0 && data.currentLineIndex <= 300 &&
+             data.currentLineIndex is int && data.currentLineIndex >= 0 && data.currentLineIndex <= 1500 &&
              data.enabled is bool &&
              data.intervalMinutes is int && data.intervalMinutes >= 1 && data.intervalMinutes <= 1440 &&
              data.memoryMode is bool &&
@@ -111,7 +111,7 @@ service cloud.firestore {
 
     function isValidVocabList(data, userId) {
       return data.userId == userId &&
-             data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 250 &&
              data.enabled is bool &&
              data.intervalMinutes is int && data.intervalMinutes >= 1 && data.intervalMinutes <= 1440 &&
              data.reverseMode is bool &&
@@ -124,7 +124,7 @@ service cloud.firestore {
       return data.userId == userId &&
              isValidId(data.listId) &&
              data.word is string && data.word.size() >= 1 && data.word.size() <= 120 &&
-             data.meaningBn is string && data.meaningBn.size() <= 300 &&
+             data.meaningBn is string && data.meaningBn.size() <= 1000 &&
              data.enabled is bool &&
              data.mastered is bool &&
              data.weakCount is int && data.weakCount >= 0 && data.weakCount <= 100000 &&
@@ -136,7 +136,7 @@ service cloud.firestore {
     function isValidWeakWord(data, userId) {
       return data.userId == userId &&
              data.word is string && data.word.size() >= 1 && data.word.size() <= 120 &&
-             data.meaningBn is string && data.meaningBn.size() <= 300 &&
+             data.meaningBn is string && data.meaningBn.size() <= 1000 &&
              data.sourceType in ['paragraph', 'vocab'] &&
              data.mistakeCount is int && data.mistakeCount >= 1 && data.mistakeCount <= 100000 &&
              data.lastMistakeEpochMs is int && data.lastMistakeEpochMs >= 0 &&
@@ -145,10 +145,10 @@ service cloud.firestore {
 
     function isValidTranslationCache(data, userId) {
       return data.userId == userId &&
-             data.sourceText is string && data.sourceText.size() >= 1 && data.sourceText.size() <= 1000 &&
+             data.sourceText is string && data.sourceText.size() >= 1 && data.sourceText.size() <= 5000 &&
              data.sourceLang is string && data.sourceLang.size() >= 2 && data.sourceLang.size() <= 10 &&
              data.targetLang is string && data.targetLang.size() >= 2 && data.targetLang.size() <= 10 &&
-             data.translatedText is string && data.translatedText.size() >= 1 && data.translatedText.size() <= 2000 &&
+             data.translatedText is string && data.translatedText.size() >= 1 && data.translatedText.size() <= 10000 &&
              data.updatedAtEpochMs is int && data.updatedAtEpochMs >= 0;
     }
 

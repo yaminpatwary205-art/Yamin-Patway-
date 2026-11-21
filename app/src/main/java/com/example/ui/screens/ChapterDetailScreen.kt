@@ -473,10 +473,24 @@ fun ChapterDetailScreen(
                         }
                     }
 
+                    val totalWords = blocks
+                        .filterIsInstance<NoteEditorBlock.TextBlock>()
+                        .sumOf { RichNoteCodec.countWords(it.value.text) }
                     Text(
                         text = "কার্সর যেখানে রাখবেন ঠিক সেখানেই (শুরুতে, লেখার মাঝখানে বা শেষে) ছবি ও আঁকা চিত্র বসবে।",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "শব্দ সংখ্যা: $totalWords / ১০,০০০ শব্দ",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (totalWords > RichNoteCodec.MAX_NOTE_WORDS) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            displayAccent
+                        },
+                        modifier = Modifier.testTag("note_word_count_label")
                     )
 
                     blocks.forEachIndexed { idx, block ->
